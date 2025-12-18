@@ -391,56 +391,48 @@
                 setReferenceImages(prev => prev.filter(img => img.id !== id));
             };
 
-            const fetchImageAsBlobUrl = async (url) => {
-                try {
-                    const response = await fetch(url, {
-                        headers: { 'Authorization': `Bearer ${accessToken}` }
-                    });
-                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-                    const blob = await response.blob();
-                    return URL.createObjectURL(blob);
-                } catch (err) {
-                    throw err;
-                }
-            };
-
-            // Helper to load image via HTMLImageElement (Robust for CORS thumbnails)
-            const loadImage = (url) => {
-                return new Promise((resolve, reject) => {
-                    const img = new Image();
-                    img.crossOrigin = "anonymous"; 
-                    img.onload = () => resolve(img);
-                    img.onerror = (e) => reject(new Error(`Image load error`));
-                    img.src = url;
-                });
-            };
-
+            // Enhanced Fetch Logic to handle CORS and API downloads
             const fetchBestImage = async (file) => {
-                // Strategy 1: Try Thumbnail via <img> tag (Google CDN is usually CORS friendly)
+                // 1. Try Thumbnail (High Res) via fetch + Blob (bypass <img> crossOrigin issues)
                 if (file.thumbnailLink) {
                     try {
                         let thumbUrl = file.thumbnailLink;
-                        // Force high resolution if parameter exists, or append if not
                         if (thumbUrl.indexOf('=s') > -1) {
-                            thumbUrl = thumbUrl.replace(/=s\d+/, '=s1000');
+                            thumbUrl = thumbUrl.replace(/=s\d+/, '=s1000'); 
                         } else {
                             thumbUrl += '=s1000';
                         }
                         
-                        return await loadImage(thumbUrl);
+                        // Try fetching thumbnail directly (works for public/some shared)
+                        const response = await fetch(thumbUrl);
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const blobUrl = URL.createObjectURL(blob);
+                            const img = await faceapi.fetchImage(blobUrl);
+                            img._blobUrl = blobUrl; // Mark for cleanup
+                            return img;
+                        }
                     } catch (e) {
-                        // Silent fail, try fallback
+                        // Silent fail, proceed to fallback
                     }
                 }
 
-                // Strategy 2: API Download (Reliable but slower, needs Token)
+                // 2. Fallback: API Download via fetch + Auth Token (Reliable for shared/private)
                 try {
                     const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-                    const blobUrl = await fetchImageAsBlobUrl(fetchUrl); 
-                    const img = await loadImage(blobUrl);
+                    const response = await fetch(fetchUrl, {
+                        headers: { 'Authorization': `Bearer ${accessToken}` },
+                        cache: 'no-cache'
+                    });
                     
-                    // Attach blobUrl to img to revoke later
-                    img._blobUrl = blobUrl; 
+                    if (!response.ok) {
+                        throw new Error(`API Download failed: ${response.status} ${response.statusText}`);
+                    }
+                    
+                    const blob = await response.blob();
+                    const blobUrl = URL.createObjectURL(blob);
+                    const img = await faceapi.fetchImage(blobUrl);
+                    img._blobUrl = blobUrl;
                     return img;
                 } catch (e) {
                     throw new Error(`All loading methods failed: ${e.message}`);
@@ -587,10 +579,9 @@
                         try {
                             const img = await fetchBestImage(file);
                             
-                            // 稍微降低 minConfidence 以偵測較模糊的臉
                             const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 })).withFaceLandmarks().withFaceDescriptors();
                             
-                            // Clean up blob if exists
+                            // Cleanup blob if created
                             if (img._blobUrl) {
                                 URL.revokeObjectURL(img._blobUrl);
                             }
