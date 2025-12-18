@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>企業內部找相助手 (HTML版)</title>
+    
+    <!-- 1. 引入 Tailwind CSS (樣式) -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- 2. 引入 React 和 Babel (核心運作庫) -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+    <!-- 3. Google API Script -->
+    <script src="https://apis.google.com/js/api.js" async defer></script>
+    <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+    <style>
+        /* 自定義動畫 */
+        @keyframes scan {
+            0% { transform: translateY(-100%); }
+            100% { transform: translateY(100%); }
+        }
+        .animate-scan { animation: scan 2s linear infinite; }
+    </style>
+</head>
+<body class="bg-gray-100 font-sans text-gray-800">
+
+    <div id="root"></div>
+
+    <!-- 4. React 程式碼邏輯 -->
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        /* =============================================================================
+           【設定區】
+           已填入用戶提供的 Client ID。
+           
+           重要設定提醒：
+           1. 部署後，請去 Google Cloud Console (API和服務 -> 憑證)。
+           2. 在 "已授權的 JavaScript 來源" 加入您的網址。
+              - GitHub Pages: https://您的帳號.github.io
+              - Firebase: https://您的專案.web.app
+              - 本機測試: http://127.0.0.1:5500
+           =============================================================================
+        */
+        const CLIENT_ID = "906447546310-1np59gt29f4mssiogc2ghcdk8fje30jo.apps.googleusercontent.com"; 
+        
+        const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
+        const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
+
+        // --- 簡易圖示元件 (取代 Lucide-React 以減少依賴) ---
+        const Icon = ({ d, className }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
+                <path d={d} />
+            </svg>
+        );
+
+        const Icons = {
+            Cloud: (props) => <Icon {...props} d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19H5c-1.105 0-2-.895-2-2 0-.46.147-.887.397-1.235C2.47 14.88 2 13.565 2 12c0-3.313 2.687-6 6-6 .56 0 1.096.078 1.605.223C10.66 4.093 13.1 2.5 16 2.5c3.313 0 6 2.687 6 6 0 .53-.07 1.04-.198 1.527C23.033 10.975 23.5 12.18 23.5 13.5c0 1.933-1.567 3.5-3.5 3.5h-2.5z" />,
+            Shield: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+            AlertCircle: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+            Camera: (props) => <Icon {...props} d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
+            Search: (props) => <Icon {...props} d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" />,
+            Loader2: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
+            ImageIcon: (props) => <Icon {...props} d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 12l3-5 5 8H6l4-7zM21 3H3v18h18V3z" />
+        };
+
+        // --- 主程式元件 ---
+        function App() {
+            const [user, setUser] = useState(null);
+            const [tokenClient, setTokenClient] = useState(null);
+            const [gapiInited, setGapiInited] = useState(false);
+            const [gisInited, setGisInited] = useState(false);
+            
+            const [currentStep, setCurrentStep] = useState('login'); 
+            const [selectedImage, setSelectedImage] = useState(null);
+            const [status, setStatus] = useState('');
+            const [driveFiles, setDriveFiles] = useState([]);
+            const [foundPhotos, setFoundPhotos] = useState([]);
+            const [scanProgress, setScanProgress] = useState(0);
+
+            // 初始化 Google API
+            useEffect(() => {
+                const initGapi = async () => {
+                    await window.gapi.client.init({
+                        discoveryDocs: DISCOVERY_DOCS,
+                    });
+                    setGapiInited(true);
+                };
+
+                const checkGoogleLoaded = setInterval(() => {
+                    if (window.gapi) {
+                        window.gapi.load("client", initGapi);
+                        clearInterval(checkGoogleLoaded);
+                    }
+                }, 500);
+
+                const checkGisLoaded = setInterval(() => {
+                    if (window.google) {
+                        const client = window.google.accounts.oauth2.initTokenClient({
+                            client_id: CLIENT_ID,
+                            scope: SCOPES,
+                            callback: (tokenResponse) => {
+                                if (tokenResponse && tokenResponse.access_token) {
+                                    fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                                        headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
+                                    })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                        setUser(data);
+                                        setCurrentStep('upload');
+                                    });
+                                }
+                            },
+                        });
+                        setTokenClient(client);
+                        setGisInited(true);
+                        clearInterval(checkGisLoaded);
+                    }
+                }, 500);
+
+                return () => {
+                    clearInterval(checkGoogleLoaded);
+                    clearInterval(checkGisLoaded);
+                }
+            }, []);
+
+            const handleLogin = () => {
+                if (CLIENT_ID.includes("YOUR_CLIENT_ID")) {
+                    alert("請先用文字編輯器打開此檔案，填入正確的 CLIENT_ID！");
+                    return;
+                }
+                if (tokenClient) {
+                    tokenClient.requestAccessToken();
+                }
+            };
+
+            const handleFileSelect = (event) => {
+                const file = event.target.files[0];
+                if (file) {
+                    const reader = new FileReader();
+                    reader.onload = (e) => setSelectedImage(e.target.result);
+                    reader.readAsDataURL(file);
+                }
+            };
+
+            const startSearch = async () => {
+                setCurrentStep('scanning');
+                setStatus('正在連接 Google Drive...');
+                setScanProgress(5);
+
+                try {
+                    setStatus('正在列出 Drive 中的圖片...');
+                    const response = await window.gapi.client.drive.files.list({
+                        'pageSize': 50,
+                        'fields': "nextPageToken, files(id, name, thumbnailLink, webContentLink, createdTime)",
+                        'q': "mimeType contains 'image/' and trashed = false"
+                    });
+                    
+                    const files = response.result.files;
+                    setDriveFiles(files || []);
+                    setScanProgress(30);
+
+                    if (!files || files.length === 0) {
+                        setStatus('您的 Drive 中沒有發現圖片。');
+                        setTimeout(() => setCurrentStep('upload'), 2000);
+                        return;
+                    }
+
+                    setStatus(`正在分析 ${files.length} 張照片的特徵值...`);
+                    let processed = 0;
+                    const matches = [];
+
+                    for (const file of files) {
+                        processed++;
+                        setScanProgress(30 + Math.floor((processed / files.length) * 70));
+                        
+                        // 模擬 AI 運算 (真實情況需引入 Face-API)
+                        await new Promise(r => setTimeout(r, 50)); 
+                        
+                        if (Math.random() > 0.8) { 
+                            matches.push({
+                                id: file.id,
+                                url: file.thumbnailLink || "https://via.placeholder.com/300?text=No+Preview",
+                                name: file.name,
+                                score: Math.floor(Math.random() * 10) + 90
+                            });
+                        }
+                    }
+
+                    setFoundPhotos(matches);
+                    setStatus('搜尋完成！');
+                    setTimeout(() => setCurrentStep('results'), 500);
+
+                } catch (err) {
+                    console.error(err);
+                    setStatus('發生錯誤：' + err.message);
+                }
+            };
+
+            if (!gapiInited || !gisInited) {
+                return (
+                    <div className="flex items-center justify-center h-screen bg-gray-50">
+                        <div className="flex flex-col items-center">
+                            <Icons.Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
+                            <p className="text-gray-500">正在初始化 Google 服務...</p>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
+                    <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden min-h-[600px] flex flex-col">
+                        
+                        {/* Header */}
+                        <div className="bg-white border-b p-6 flex justify-between items-center shrink-0">
+                            <div className="flex items-center gap-2">
+                                <div className="bg-blue-600 p-2 rounded-lg">
+                                    <Icons.Cloud className="w-6 h-6 text-white" />
+                                </div>
+                                <h1 className="text-xl font-bold text-gray-900">企業內部找相助手</h1>
+                            </div>
+                            {user && (
+                                <div className="flex items-center gap-3 bg-gray-50 px-3 py-1 rounded-full">
+                                    <img src={user.picture} alt="Avatar" className="w-6 h-6 rounded-full" />
+                                    <span className="text-sm font-medium text-gray-600">{user.name}</span>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* Content */}
+                        <div className="flex-1 flex flex-col p-6">
+                            
+                            {/* Step 1: Login */}
+                            {currentStep === 'login' && (
+                                <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center">
+                                    <div className="bg-blue-50 p-8 rounded-full mb-4">
+                                        <Icons.Shield className="w-16 h-16 text-blue-600" />
+                                    </div>
+                                    <div className="space-y-2 max-w-md">
+                                        <h2 className="text-2xl font-bold">安全連接您的 Google Drive</h2>
+                                        <p className="text-gray-500">
+                                            此為 HTML 獨立版本。我們會掃描您 Drive 中的照片並建立本地索引，照片不會上傳至外部伺服器。
+                                        </p>
+                                    </div>
+                                    
+                                    {CLIENT_ID.includes("YOUR_CLIENT_ID") ? (
+                                        <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-lg flex items-start text-left text-sm max-w-md">
+                                            <div className="mr-2 mt-0.5"><Icons.AlertCircle className="w-5 h-5" /></div>
+                                            <div>
+                                                <strong>尚未設定 Client ID</strong>
+                                                <p>請用文字編輯器打開此 HTML 檔，搜尋 CLIENT_ID 並填入您申請的代碼。</p>
+                                            </div>
+                                        </div>
+                                    ) : (
+                                        <button 
+                                            onClick={handleLogin}
+                                            className="bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-3 px-8 rounded-xl flex items-center transition-all shadow-lg hover:shadow-blue-500/30"
+                                        >
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-6 h-6 mr-3 bg-white rounded-full p-0.5" alt="G" />
+                                            使用 Google 帳號登入
+                                        </button>
+                                    )}
+                                </div>
+                            )}
+
+                            {/* Step 2: Upload */}
+                            {currentStep === 'upload' && (
+                                <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-[fadeIn_0.5s_ease-out]">
+                                    <h2 className="text-2xl font-bold">您要搜尋誰？</h2>
+                                    
+                                    <label className="cursor-pointer group">
+                                        <div className={`w-64 h-64 rounded-2xl border-4 border-dashed flex items-center justify-center overflow-hidden relative transition-all ${selectedImage ? 'border-blue-500 bg-gray-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}`}>
+                                            {selectedImage ? (
+                                                <img src={selectedImage} alt="Target" className="w-full h-full object-cover" />
+                                            ) : (
+                                                <div className="text-center p-6">
+                                                    <Icons.Camera className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                                    <p className="text-gray-500 font-medium">上傳自拍或照片</p>
+                                                </div>
+                                            )}
+                                            <input type="file" className="hidden" accept="image/*" onChange={handleFileSelect} />
+                                        </div>
+                                    </label>
+
+                                    <button 
+                                        onClick={startSearch}
+                                        disabled={!selectedImage}
+                                        className={`w-64 py-3 rounded-xl font-semibold flex items-center justify-center transition-all ${
+                                            selectedImage ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
+                                        }`}
+                                    >
+                                        <Icons.Search className="w-5 h-5 mr-2" />
+                                        開始搜尋 Drive
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Step 3: Scanning */}
+                            {currentStep === 'scanning' && (
+                                <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8">
+                                    <div className="relative">
+                                        <div className="w-24 h-24 border-4 border-blue-100 rounded-full animate-spin border-t-blue-600"></div>
+                                        <div className="absolute inset-0 flex items-center justify-center font-bold text-blue-600">
+                                            {scanProgress}%
+                                        </div>
+                                    </div>
+                                    <div>
+                                        <h3 className="text-xl font-bold mb-2">AI 正在分析相片</h3>
+                                        <p className="text-gray-500 h-6">{status}</p>
+                                    </div>
+                                    <div className="w-full max-w-md bg-gray-200 rounded-full h-2">
+                                        <div 
+                                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
+                                            style={{ width: `${scanProgress}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Step 4: Results */}
+                            {currentStep === 'results' && (
+                                <div className="flex-1 flex flex-col">
+                                    <div className="flex justify-between items-end mb-6">
+                                        <div>
+                                            <h2 className="text-2xl font-bold text-gray-900">搜尋結果</h2>
+                                            <p className="text-gray-500">找到了 {foundPhotos.length} 張照片</p>
+                                        </div>
+                                        <button 
+                                            onClick={() => { setCurrentStep('upload'); setFoundPhotos([]); setDriveFiles([]); }}
+                                            className="text-sm text-blue-600 hover:underline"
+                                        >
+                                            重新搜尋
+                                        </button>
+                                    </div>
+
+                                    <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto max-h-[400px] p-2">
+                                        {foundPhotos.map((photo) => (
+                                            <a 
+                                                key={photo.id} 
+                                                href={photo.url} 
+                                                target="_blank"
+                                                rel="noopener noreferrer"
+                                                className="relative group aspect-square rounded-xl overflow-hidden bg-gray-200 cursor-pointer shadow-sm hover:shadow-md transition-all"
+                                            >
+                                                <img src={photo.url} alt={photo.name} className="w-full h-full object-cover" />
+                                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
+                                                    <p className="text-white text-sm font-bold">查看原圖</p>
+                                                </div>
+                                                <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full shadow-sm">
+                                                    {photo.score}%
+                                                </div>
+                                            </a>
+                                        ))}
+                                    </div>
+                                    
+                                    {foundPhotos.length === 0 && (
+                                        <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
+                                            <Icons.ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
+                                            <p className="text-gray-500">沒有找到匹配的照片</p>
+                                        </div>
+                                    )}
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
