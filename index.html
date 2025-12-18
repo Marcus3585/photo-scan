@@ -3,25 +3,17 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (修復版)</title>
+    <title>Photo Team 找相助手 (Debug除錯版)</title>
     
-    <!-- 1. 引入 Tailwind CSS (樣式) -->
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <!-- 2. 引入 React 和 Babel (核心運作庫) -->
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-
-    <!-- 3. Google API Script -->
     <script src="https://apis.google.com/js/api.js" async defer></script>
     <script src="https://accounts.google.com/gsi/client" async defer></script>
-
-    <!-- 4. 引入 Face-API.js (真實人臉識別) -->
     <script src="https://cdn.jsdelivr.net/npm/face-api.js@0.22.2/dist/face-api.min.js"></script>
 
     <style>
-        /* 自定義動畫 */
         @keyframes scan {
             0% { transform: translateY(-100%); }
             100% { transform: translateY(100%); }
@@ -33,29 +25,18 @@
 
     <div id="root"></div>
 
-    <!-- 5. React 程式碼邏輯 -->
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        /* =============================================================================
-           【設定區】
-           =============================================================================
-        */
         const CLIENT_ID = "906447546310-1np59gt29f4mssiogc2ghcdk8fje30jo.apps.googleusercontent.com"; 
-        
-        // 已填入您的資料夾 ID
         const TARGET_FOLDER_ID = "14KF0TB3JH5yn2xtvZTeMxX0sjwnoB9iG"; 
         
         const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
         const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
-
         const MODEL_URL = 'https://justadudewhohacks.github.io/face-api.js/models';
 
-        // --- 簡易圖示元件 ---
         const Icon = ({ d, className }) => (
-            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}>
-                <path d={d} />
-            </svg>
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className}><path d={d} /></svg>
         );
 
         const Icons = {
@@ -67,49 +48,51 @@
             Loader2: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
             ImageIcon: (props) => <Icon {...props} d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 12l3-5 5 8H6l4-7zM21 3H3v18h18V3z" />,
             Brain: (props) => <Icon {...props} d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />,
-            Folder: (props) => <Icon {...props} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />,
-            Lock: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            Lock: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
+            Terminal: (props) => <Icon {...props} d="M4 17l6-6-6-6M12 19h8" />
         };
 
-        // --- 主程式元件 ---
         function App() {
             const [user, setUser] = useState(null);
+            const [accessToken, setAccessToken] = useState(null); // 新增：儲存 Token 用於下載圖片
             const [tokenClient, setTokenClient] = useState(null);
             const [gapiInited, setGapiInited] = useState(false);
             const [gisInited, setGisInited] = useState(false);
             const [modelsLoaded, setModelsLoaded] = useState(false);
             
-            // Steps: login -> (check-folder) -> upload -> scanning -> results
             const [currentStep, setCurrentStep] = useState('login'); 
-            const [folders, setFolders] = useState([]); 
             const [selectedFolder, setSelectedFolder] = useState(null); 
             const [selectedImage, setSelectedImage] = useState(null);
             const [targetDescriptor, setTargetDescriptor] = useState(null);
             const [status, setStatus] = useState('');
-            const [errorMessage, setErrorMessage] = useState(null); // 新增錯誤訊息狀態
-            const [driveFiles, setDriveFiles] = useState([]);
+            const [errorMessage, setErrorMessage] = useState(null);
             const [foundPhotos, setFoundPhotos] = useState([]);
             const [scanProgress, setScanProgress] = useState(0);
+            const [debugLogs, setDebugLogs] = useState([]); // 新增：Debug 日誌
 
-            // 初始化 Google API 與 Face API
+            // 輔助：寫入 Log
+            const addLog = (msg, type = 'info') => {
+                const time = new Date().toLocaleTimeString();
+                setDebugLogs(prev => [`[${time}] ${msg}`, ...prev]);
+                console.log(`[AppLog] ${msg}`);
+            };
+
             useEffect(() => {
                 const initGapi = async () => {
-                    await window.gapi.client.init({
-                        discoveryDocs: DISCOVERY_DOCS,
-                    });
+                    await window.gapi.client.init({ discoveryDocs: DISCOVERY_DOCS });
                     setGapiInited(true);
                 };
 
                 const loadModels = async () => {
                     try {
-                        console.log("Loading AI Models...");
+                        addLog("開始載入 AI 模型...", 'info');
                         await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
-                        console.log("Models Loaded!");
+                        addLog("AI 模型載入完成！", 'success');
                         setModelsLoaded(true);
                     } catch (e) {
-                        console.error("Model load failed:", e);
+                        addLog("模型載入失敗: " + e.message, 'error');
                     }
                 };
 
@@ -129,19 +112,16 @@
                             scope: SCOPES,
                             callback: (tokenResponse) => {
                                 if (tokenResponse && tokenResponse.access_token) {
+                                    setAccessToken(tokenResponse.access_token); // 儲存 Token
                                     fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                                         headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
                                     })
                                     .then(res => res.json())
                                     .then(data => {
                                         setUser(data);
-                                        // 登入後邏輯分支
+                                        addLog(`使用者登入: ${data.name}`);
                                         if (TARGET_FOLDER_ID && TARGET_FOLDER_ID.trim() !== "") {
-                                            // 有設定鎖定資料夾，直接驗證並進入上傳
                                             verifyAndSetTargetFolder(TARGET_FOLDER_ID);
-                                        } else {
-                                            // 沒設定，讓使用者自己選
-                                            fetchFolders();
                                         }
                                     });
                                 }
@@ -161,56 +141,29 @@
 
             const handleLogin = () => {
                 if (CLIENT_ID.includes("YOUR_CLIENT_ID")) {
-                    alert("請先用文字編輯器打開此檔案，填入正確的 CLIENT_ID！");
+                    alert("請設定 Client ID");
                     return;
                 }
-                setErrorMessage(null); // 清除舊錯誤
-                if (tokenClient) {
-                    tokenClient.requestAccessToken();
-                }
+                setErrorMessage(null);
+                if (tokenClient) tokenClient.requestAccessToken();
             };
 
-            // 驗證並鎖定特定資料夾 (修復：加入 supportsAllDrives 參數)
             const verifyAndSetTargetFolder = async (folderId) => {
                 try {
+                    addLog(`正在驗證資料夾 ID: ${folderId}`);
                     const response = await window.gapi.client.drive.files.get({
                         fileId: folderId,
                         fields: 'id, name, webViewLink',
-                        supportsAllDrives: true // 關鍵：支援共用雲端硬碟
+                        supportsAllDrives: true
                     });
-                    const folder = response.result;
-                    setSelectedFolder(folder);
+                    setSelectedFolder(response.result);
+                    addLog(`成功鎖定資料夾: ${response.result.name}`);
                     setCurrentStep('upload');
                 } catch (err) {
-                    console.error("無法存取指定資料夾", err);
-                    
-                    let msg = "無法存取指定的資料夾。";
-                    if (err.status === 404) msg += " (找不到資料夾，請確認 ID 是否正確或已刪除)";
-                    if (err.status === 403) msg += " (權限不足，請確認您已獲得該資料夾的檢視權限)";
-                    
-                    setErrorMessage(msg + ` [錯誤代碼: ${err.status}]`);
+                    addLog(`無法存取資料夾: ${err.status}`, 'error');
+                    setErrorMessage(`無法存取指定資料夾 (${err.status})。請確認權限。`);
                     setUser(null);
                     setCurrentStep('login');
-                }
-            };
-
-            // 抓取 Drive 中的資料夾列表 (僅在無指定 TARGET_FOLDER_ID 時使用)
-            const fetchFolders = async () => {
-                try {
-                    const response = await window.gapi.client.drive.files.list({
-                        'pageSize': 50,
-                        'fields': "nextPageToken, files(id, name)",
-                        'q': "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-                        'orderBy': 'folder, name',
-                        supportsAllDrives: true,
-                        includeItemsFromAllDrives: true
-                    });
-                    setFolders(response.result.files || []);
-                    setCurrentStep('select-folder');
-                } catch (err) {
-                    console.error("Error fetching folders", err);
-                    setErrorMessage("無法讀取資料夾列表: " + err.message);
-                    setCurrentStep('upload');
                 }
             };
 
@@ -230,13 +183,14 @@
                                 if (detections) {
                                     setTargetDescriptor(detections.descriptor);
                                     setStatus("臉部特徵提取成功！");
+                                    addLog("目標人臉特徵提取成功", 'success');
                                 } else {
                                     alert("無法在圖片中檢測到人臉，請換一張清晰的正面照。");
+                                    addLog("上傳圖片中未檢測到人臉", 'warn');
                                     setSelectedImage(null);
                                 }
                             } catch (err) {
-                                console.error(err);
-                                alert("分析圖片時發生錯誤");
+                                addLog("分析上傳圖片失敗: " + err.message, 'error');
                             }
                         }
                     };
@@ -244,53 +198,58 @@
                 }
             };
 
+            // 關鍵函數：使用 Token 下載圖片並轉換為 Blob URL (解決 CORS)
+            const fetchImageAsBlobUrl = async (url) => {
+                try {
+                    const response = await fetch(url, {
+                        headers: {
+                            'Authorization': `Bearer ${accessToken}` // 加上 Token
+                        }
+                    });
+                    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+                    const blob = await response.blob();
+                    return URL.createObjectURL(blob);
+                } catch (err) {
+                    throw err;
+                }
+            };
+
             const startSearch = async () => {
-                if (!modelsLoaded) {
-                    alert("AI 模型尚未載入完成，請稍候...");
-                    return;
-                }
-                if (!targetDescriptor) {
-                    alert("尚未獲取目標臉部特徵，請重新上傳照片。");
-                    return;
-                }
+                if (!modelsLoaded || !targetDescriptor) return;
 
                 setCurrentStep('scanning');
                 setStatus('正在連接 Google Drive...');
                 setScanProgress(5);
+                setDebugLogs([]); // 清空舊日誌
+                setFoundPhotos([]);
+                addLog("開始新搜尋任務...");
 
                 try {
-                    setStatus('正在列出資料夾中的圖片...');
-                    
-                    // 建構查詢語句 (修復：放寬 MIME 限制，搜尋所有圖片類型)
                     let query = "mimeType contains 'image/' and trashed = false";
-                    
-                    // 強制加入 parents 條件
                     if (selectedFolder) {
                         query += ` and '${selectedFolder.id}' in parents`;
-                        setStatus(`正在搜尋 Photo Team 資料夾：${selectedFolder.name}...`);
-                    } else {
-                        setStatus(`正在搜尋整個雲端硬碟...`);
                     }
 
                     const response = await window.gapi.client.drive.files.list({
-                        'pageSize': 50, 
+                        'pageSize': 30, // 限制 30 張以方便除錯
                         'fields': "nextPageToken, files(id, name, thumbnailLink, webContentLink, createdTime)",
                         'q': query,
-                        supportsAllDrives: true,       // 關鍵：支援共用雲端硬碟
-                        includeItemsFromAllDrives: true // 關鍵：包含所有來源
+                        supportsAllDrives: true,
+                        includeItemsFromAllDrives: true
                     });
                     
                     const files = response.result.files;
-                    setDriveFiles(files || []);
-                    setScanProgress(10);
-
+                    
                     if (!files || files.length === 0) {
                         setStatus('此資料夾中沒有發現圖片。');
+                        addLog("Drive 查詢返回 0 個檔案", 'warn');
                         setTimeout(() => setCurrentStep('upload'), 2000);
                         return;
                     }
 
-                    setStatus(`正在 AI 比對 ${files.length} 張照片...`);
+                    addLog(`找到 ${files.length} 個檔案，開始逐一比對...`);
+                    setStatus(`正在比對 ${files.length} 張照片...`);
+                    
                     let processed = 0;
                     const matches = [];
 
@@ -298,56 +257,64 @@
                         processed++;
                         const progress = 10 + Math.floor((processed / files.length) * 90);
                         setScanProgress(progress);
-                        setStatus(`正在分析: ${file.name} (${processed}/${files.length})`);
+                        setStatus(`分析中: ${file.name}`);
                         
-                        if (file.thumbnailLink) {
-                            try {
-                                const img = new Image();
-                                img.crossOrigin = "anonymous";
-                                img.src = file.thumbnailLink.replace('=s220', '=s1000'); 
+                        if (!file.thumbnailLink) {
+                            addLog(`[跳過] ${file.name} - 無縮圖連結`);
+                            continue;
+                        }
 
-                                await new Promise((resolve, reject) => {
-                                    img.onload = resolve;
-                                    img.onerror = reject;
+                        try {
+                            // 策略：先嘗試高清縮圖，失敗則用普通縮圖
+                            let fetchUrl = file.thumbnailLink.replace('=s220', '=s1000'); 
+                            
+                            // 關鍵修改：使用 fetch + blob 載入圖片
+                            const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
+                            
+                            const img = await faceapi.fetchImage(blobUrl);
+                            const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors();
+                            
+                            if (detections.length === 0) {
+                                addLog(`[無人臉] ${file.name}`);
+                            } else {
+                                let bestDist = 1.0;
+                                detections.forEach(d => {
+                                    const dist = faceapi.euclideanDistance(targetDescriptor, d.descriptor);
+                                    if (dist < bestDist) bestDist = dist;
                                 });
 
-                                const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors();
-                                
-                                let bestMatchDistance = 1.0; 
-                                
-                                if (detections.length > 0) {
-                                    detections.forEach(d => {
-                                        const distance = faceapi.euclideanDistance(targetDescriptor, d.descriptor);
-                                        if (distance < bestMatchDistance) {
-                                            bestMatchDistance = distance;
-                                        }
-                                    });
+                                // 顯示每張照片的最佳距離 (越小越像)
+                                const isMatch = bestDist < 0.55; // 稍微嚴格一點
+                                addLog(`[${isMatch ? '匹配' : '不符'}] ${file.name} - 距離: ${bestDist.toFixed(4)}`);
 
-                                    if (bestMatchDistance < 0.6) {
-                                        matches.push({
-                                            id: file.id,
-                                            url: file.thumbnailLink,
-                                            name: file.name,
-                                            score: Math.floor((1 - bestMatchDistance) * 100)
-                                        });
-                                    }
+                                if (isMatch) {
+                                    matches.push({
+                                        id: file.id,
+                                        url: file.thumbnailLink, // 顯示用原連結
+                                        name: file.name,
+                                        score: Math.floor((1 - bestDist) * 100)
+                                    });
                                 }
-                            } catch (err) {
-                                console.warn(`無法分析圖片 ${file.name} (可能是 CORS 限制):`, err);
                             }
+                            
+                            // 釋放記憶體
+                            URL.revokeObjectURL(blobUrl);
+
+                        } catch (err) {
+                            addLog(`[錯誤] ${file.name} - ${err.message}`, 'error');
                         }
                     }
 
                     setFoundPhotos(matches);
                     setStatus('搜尋完成！');
-                    setTimeout(() => setCurrentStep('results'), 500);
+                    addLog(`搜尋結束，共找到 ${matches.length} 張匹配照片。`);
+                    setTimeout(() => setCurrentStep('results'), 1000);
 
                 } catch (err) {
                     console.error(err);
-                    setStatus('發生錯誤：' + err.message);
                     setErrorMessage(err.message);
-                    // 發生嚴重錯誤時返回上一步
-                    setTimeout(() => setCurrentStep('upload'), 3000);
+                    addLog("搜尋過程發生致命錯誤: " + err.message, 'error');
+                    setTimeout(() => setCurrentStep('upload'), 5000);
                 }
             };
 
@@ -356,16 +323,15 @@
                     <div className="flex items-center justify-center h-screen bg-gray-50">
                         <div className="flex flex-col items-center">
                             <Icons.Loader2 className="w-10 h-10 text-blue-600 animate-spin mb-4" />
-                            <p className="text-gray-500">正在初始化 Google 服務...</p>
-                            {!modelsLoaded && <p className="text-xs text-gray-400 mt-2">正在下載 AI 模型 (首次需時較長)...</p>}
+                            <p className="text-gray-500">正在初始化...</p>
                         </div>
                     </div>
                 );
             }
 
             return (
-                <div className="min-h-screen p-4 md:p-8 flex items-center justify-center">
-                    <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden min-h-[600px] flex flex-col">
+                <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
+                    <div className="w-full max-w-2xl bg-white rounded-2xl shadow-xl overflow-hidden min-h-[600px] flex flex-col mb-8">
                         
                         {/* Header */}
                         <div className="bg-white border-b p-6 flex justify-between items-center shrink-0">
@@ -375,9 +341,7 @@
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-bold text-gray-900">Photo Team 找相助手</h1>
-                                    <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
-                                        {selectedFolder ? `鎖定資料夾: ${selectedFolder.name}` : "AI 增強版"}
-                                    </span>
+                                    <span className="text-xs text-red-500 font-bold bg-red-50 px-2 py-0.5 rounded border border-red-100">Debug 模式</span>
                                 </div>
                             </div>
                             {user && (
@@ -391,214 +355,94 @@
                         {/* Content */}
                         <div className="flex-1 flex flex-col p-6">
                             
-                            {/* Step 1: Login */}
+                            {/* Login */}
                             {currentStep === 'login' && (
                                 <div className="flex-1 flex flex-col items-center justify-center space-y-8 text-center">
-                                    <div className="bg-blue-50 p-8 rounded-full mb-4">
-                                        <Icons.Shield className="w-16 h-16 text-blue-600" />
-                                    </div>
+                                    <Icons.Shield className="w-16 h-16 text-blue-600" />
                                     <div className="space-y-2 max-w-md">
                                         <h2 className="text-2xl font-bold">Photo Team 專用搜尋</h2>
-                                        <p className="text-gray-500">
-                                            請登入以存取共享的相片資料夾。系統將自動掃描並找出屬於您的照片。
-                                        </p>
+                                        <p className="text-gray-500">Debug 版：將顯示詳細掃描日誌</p>
                                     </div>
-
-                                    {/* 錯誤訊息顯示區 */}
-                                    {errorMessage && (
-                                        <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm max-w-md flex items-start">
-                                            <Icons.AlertCircle className="w-5 h-5 mr-2 shrink-0" />
-                                            <div>{errorMessage}</div>
-                                        </div>
-                                    )}
-                                    
-                                    {CLIENT_ID.includes("YOUR_CLIENT_ID") ? (
-                                        <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-lg flex items-start text-left text-sm max-w-md">
-                                            <div className="mr-2 mt-0.5"><Icons.AlertCircle className="w-5 h-5" /></div>
-                                            <div>
-                                                <strong>尚未設定 Client ID</strong>
-                                                <p>請用文字編輯器打開此 HTML 檔，搜尋 CLIENT_ID 並填入您申請的代碼。</p>
-                                            </div>
-                                        </div>
-                                    ) : (
-                                        <button 
-                                            onClick={handleLogin}
-                                            className="bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-3 px-8 rounded-xl flex items-center transition-all shadow-lg hover:shadow-blue-500/30"
-                                        >
-                                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-6 h-6 mr-3 bg-white rounded-full p-0.5" alt="G" />
-                                            使用 Google 帳號登入
-                                        </button>
-                                    )}
-                                </div>
-                            )}
-
-                            {/* Step 2: Select Folder (Only shown if NO target folder ID is set) */}
-                            {currentStep === 'select-folder' && (
-                                <div className="flex-1 flex flex-col space-y-4 animate-[fadeIn_0.5s_ease-out]">
-                                    <h2 className="text-2xl font-bold text-center mb-4">選擇搜尋範圍</h2>
-                                    
-                                    <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
-                                        {/* 全域搜尋選項 */}
-                                        <div 
-                                            onClick={() => { setSelectedFolder(null); setCurrentStep('upload'); }}
-                                            className="flex items-center p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition-all"
-                                        >
-                                            <div className="bg-gray-200 p-2 rounded-lg mr-4">
-                                                <Icons.Cloud className="w-6 h-6 text-gray-600" />
-                                            </div>
-                                            <div>
-                                                <p className="font-bold text-gray-800">搜尋整個雲端硬碟</p>
-                                                <p className="text-xs text-gray-500">可能會花費較長時間</p>
-                                            </div>
-                                        </div>
-
-                                        <p className="text-sm text-gray-500 font-bold mt-4 px-2">或選擇特定資料夾：</p>
-                                        
-                                        {folders.length === 0 ? (
-                                            <p className="text-center text-gray-400 py-4">沒有找到資料夾</p>
-                                        ) : (
-                                            folders.map(folder => (
-                                                <div 
-                                                    key={folder.id}
-                                                    onClick={() => { setSelectedFolder(folder); setCurrentStep('upload'); }}
-                                                    className="flex items-center p-3 rounded-xl border border-gray-100 hover:bg-gray-100 cursor-pointer transition-all"
-                                                >
-                                                    <Icons.Folder className="w-5 h-5 text-blue-500 mr-3" />
-                                                    <span className="text-gray-700 font-medium truncate">{folder.name}</span>
-                                                </div>
-                                            ))
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-
-                            {/* Step 3: Upload */}
-                            {currentStep === 'upload' && (
-                                <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-[fadeIn_0.5s_ease-out]">
-                                    <div className="w-full flex items-center justify-between">
-                                        {(!TARGET_FOLDER_ID || TARGET_FOLDER_ID === "") && (
-                                            <button onClick={() => setCurrentStep('select-folder')} className="text-sm text-gray-400 hover:text-gray-600 flex items-center">
-                                                ← 變更資料夾
-                                            </button>
-                                        )}
-                                        <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 flex items-center ml-auto">
-                                            <Icons.Lock className="w-3 h-3 mr-1" />
-                                            搜尋範圍: {selectedFolder ? selectedFolder.name : "整個 Drive"}
-                                        </span>
-                                    </div>
-                                    <h2 className="text-2xl font-bold">您要搜尋誰？</h2>
-                                    
-                                    <label className="cursor-pointer group">
-                                        <div className={`w-64 h-64 rounded-2xl border-4 border-dashed flex items-center justify-center overflow-hidden relative transition-all ${selectedImage ? 'border-blue-500 bg-gray-50' : 'border-gray-300 hover:border-gray-400 hover:bg-gray-50'}`}>
-                                            {selectedImage ? (
-                                                <img src={selectedImage} alt="Target" className="w-full h-full object-cover" />
-                                            ) : (
-                                                <div className="text-center p-6">
-                                                    <Icons.Camera className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                                    <p className="text-gray-500 font-medium">上傳自拍或照片</p>
-                                                </div>
-                                            )}
-                                            <input type="file" className="hidden" accept="image/*" onChange={handleFileSelect} />
-                                        </div>
-                                    </label>
-                                    
-                                    {selectedImage && (
-                                        <p className={`text-sm ${targetDescriptor ? 'text-green-600 font-bold' : 'text-orange-500'}`}>
-                                            {status}
-                                        </p>
-                                    )}
-
-                                    <button 
-                                        onClick={startSearch}
-                                        disabled={!selectedImage || !targetDescriptor}
-                                        className={`w-64 py-3 rounded-xl font-semibold flex items-center justify-center transition-all ${
-                                            selectedImage && targetDescriptor ? 'bg-blue-600 text-white shadow-lg' : 'bg-gray-200 text-gray-400 cursor-not-allowed'
-                                        }`}
-                                    >
-                                        <Icons.Search className="w-5 h-5 mr-2" />
-                                        開始 AI 搜尋
+                                    {errorMessage && <div className="bg-red-50 text-red-600 p-3 rounded">{errorMessage}</div>}
+                                    <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-3 px-8 rounded-xl flex items-center shadow-lg">
+                                        使用 Google 帳號登入
                                     </button>
                                 </div>
                             )}
 
-                            {/* Step 4: Scanning */}
+                            {/* Upload */}
+                            {currentStep === 'upload' && (
+                                <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+                                    <div className="w-full flex justify-end">
+                                        <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 flex items-center">
+                                            <Icons.Lock className="w-3 h-3 mr-1" />
+                                            {selectedFolder ? selectedFolder.name : "..."}
+                                        </span>
+                                    </div>
+                                    <h2 className="text-2xl font-bold">上傳目標照片</h2>
+                                    <label className="cursor-pointer group">
+                                        <div className={`w-64 h-64 rounded-2xl border-4 border-dashed flex items-center justify-center overflow-hidden relative transition-all ${selectedImage ? 'border-blue-500 bg-gray-50' : 'border-gray-300 hover:border-gray-400'}`}>
+                                            {selectedImage ? <img src={selectedImage} className="w-full h-full object-cover" /> : <Icons.Camera className="w-12 h-12 text-gray-300" />}
+                                            <input type="file" className="hidden" accept="image/*" onChange={handleFileSelect} />
+                                        </div>
+                                    </label>
+                                    <p className={`text-sm ${targetDescriptor ? 'text-green-600' : 'text-orange-500'}`}>{status}</p>
+                                    <button onClick={startSearch} disabled={!selectedImage || !targetDescriptor} className={`w-64 py-3 rounded-xl font-semibold flex items-center justify-center ${selectedImage && targetDescriptor ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                                        <Icons.Search className="w-5 h-5 mr-2" /> 開始搜尋
+                                    </button>
+                                </div>
+                            )}
+
+                            {/* Scanning */}
                             {currentStep === 'scanning' && (
                                 <div className="flex-1 flex flex-col items-center justify-center text-center space-y-8">
                                     <div className="relative">
                                         <div className="w-24 h-24 border-4 border-blue-100 rounded-full animate-spin border-t-blue-600"></div>
-                                        <div className="absolute inset-0 flex items-center justify-center font-bold text-blue-600">
-                                            {scanProgress}%
-                                        </div>
+                                        <div className="absolute inset-0 flex items-center justify-center font-bold text-blue-600">{scanProgress}%</div>
                                     </div>
                                     <div>
-                                        <h3 className="text-xl font-bold mb-2">AI 正在逐一比對</h3>
-                                        <p className="text-gray-500 h-6 text-sm">{status}</p>
-                                    </div>
-                                    <div className="w-full max-w-md bg-gray-200 rounded-full h-2">
-                                        <div 
-                                            className="bg-blue-600 h-2 rounded-full transition-all duration-300"
-                                            style={{ width: `${scanProgress}%` }}
-                                        ></div>
+                                        <h3 className="text-xl font-bold mb-2">正在分析比對</h3>
+                                        <p className="text-gray-500 text-sm">{status}</p>
                                     </div>
                                 </div>
                             )}
 
-                            {/* Step 5: Results */}
+                            {/* Results */}
                             {currentStep === 'results' && (
                                 <div className="flex-1 flex flex-col">
                                     <div className="flex justify-between items-end mb-6">
-                                        <div>
-                                            <h2 className="text-2xl font-bold text-gray-900">搜尋結果</h2>
-                                            <p className="text-gray-500">找到了 {foundPhotos.length} 張高度相似的照片</p>
-                                        </div>
-                                        <button 
-                                            onClick={() => { 
-                                                // 如果有鎖定資料夾，重置回 upload
-                                                if (TARGET_FOLDER_ID && TARGET_FOLDER_ID.trim() !== "") {
-                                                    setCurrentStep('upload'); 
-                                                } else {
-                                                    setCurrentStep('select-folder');
-                                                }
-                                                setFoundPhotos([]); 
-                                                setDriveFiles([]); 
-                                            }}
-                                            className="text-sm text-blue-600 hover:underline"
-                                        >
-                                            重新搜尋
-                                        </button>
+                                        <h2 className="text-2xl font-bold text-gray-900">搜尋結果 ({foundPhotos.length})</h2>
+                                        <button onClick={() => { setCurrentStep('upload'); setFoundPhotos([]); }} className="text-blue-600 hover:underline">重新搜尋</button>
                                     </div>
-
                                     <div className="grid grid-cols-2 md:grid-cols-3 gap-4 overflow-y-auto max-h-[400px] p-2">
                                         {foundPhotos.map((photo) => (
-                                            <a 
-                                                key={photo.id} 
-                                                href={photo.url} 
-                                                target="_blank"
-                                                rel="noopener noreferrer"
-                                                className="relative group aspect-square rounded-xl overflow-hidden bg-gray-200 cursor-pointer shadow-sm hover:shadow-md transition-all"
-                                            >
-                                                <img src={photo.url} alt={photo.name} className="w-full h-full object-cover" />
-                                                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                                    <p className="text-white text-sm font-bold">查看原圖</p>
-                                                </div>
-                                                <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full shadow-sm">
-                                                    {photo.score}%
-                                                </div>
+                                            <a key={photo.id} href={photo.url} target="_blank" className="relative group aspect-square rounded-xl overflow-hidden bg-gray-200">
+                                                <img src={photo.url} className="w-full h-full object-cover" />
+                                                <div className="absolute top-2 right-2 bg-green-500 text-white text-xs px-2 py-1 rounded-full">{photo.score}%</div>
                                             </a>
                                         ))}
                                     </div>
-                                    
-                                    {foundPhotos.length === 0 && (
-                                        <div className="text-center py-12 bg-gray-50 rounded-xl border border-dashed border-gray-300">
-                                            <Icons.ImageIcon className="w-12 h-12 text-gray-300 mx-auto mb-3" />
-                                            <p className="text-gray-500">沒有找到匹配的照片</p>
-                                            <p className="text-xs text-gray-400 mt-2">提示：可能是因為圖片過於模糊或角度偏差太大。</p>
-                                        </div>
-                                    )}
+                                    {foundPhotos.length === 0 && <div className="text-center py-12 text-gray-500">未找到匹配照片 (請查看下方日誌)</div>}
                                 </div>
                             )}
                         </div>
                     </div>
+
+                    {/* Debug Log Console */}
+                    <div className="w-full max-w-2xl bg-gray-900 rounded-xl p-4 font-mono text-xs text-green-400 h-64 overflow-y-auto shadow-2xl border border-gray-700">
+                        <div className="flex items-center mb-2 border-b border-gray-700 pb-2">
+                            <Icons.Terminal className="w-4 h-4 mr-2" />
+                            <span className="font-bold">系統執行日誌 (Debug Log)</span>
+                        </div>
+                        <div className="space-y-1">
+                            {debugLogs.length === 0 ? <span className="text-gray-500 opacity-50">等待執行中...</span> : debugLogs.map((log, i) => (
+                                <div key={i} className={`${log.includes('[錯誤]') || log.includes('失敗') ? 'text-red-400' : log.includes('[匹配]') ? 'text-yellow-300 font-bold' : 'opacity-80'}`}>
+                                    {log}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
                 </div>
             );
         }
