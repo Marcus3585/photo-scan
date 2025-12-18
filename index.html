@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (即時運算版)</title>
+    <title>Photo Team 找相助手 (相容性增強版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -91,7 +91,7 @@
             const canvasRef = useRef(null);
             const [isCameraLoading, setIsCameraLoading] = useState(false);
             const [isFaceDetected, setIsFaceDetected] = useState(false);
-            const detectionLoopRef = useRef(null); // 用於儲存 requestAnimationFrame ID
+            const detectionLoopRef = useRef(null);
 
             const [status, setStatus] = useState('');
             const [errorMessage, setErrorMessage] = useState(null);
@@ -117,7 +117,6 @@
                 const loadModels = async () => {
                     try {
                         addLog("開始載入 AI 模型...", 'info');
-                        // 載入 SSD Mobilenet (較準確) 或 Tiny Face Detector (較快)
                         await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
@@ -192,13 +191,10 @@
             };
 
             const stopCamera = () => {
-                // 停止即時偵測迴圈
                 if (detectionLoopRef.current) {
                     cancelAnimationFrame(detectionLoopRef.current);
                     detectionLoopRef.current = null;
                 }
-
-                // 停止相機串流
                 if (videoRef.current && videoRef.current.srcObject) {
                     const tracks = videoRef.current.srcObject.getTracks();
                     tracks.forEach(track => track.stop());
@@ -208,11 +204,8 @@
                 setIsFaceDetected(false);
             };
 
-            // 當 Video 開始播放時觸發 (onPlay)
             const handleVideoOnPlay = () => {
                 if (!videoRef.current || !canvasRef.current) return;
-                
-                // 確保 AI 模型已載入
                 if (!modelsLoaded) return;
 
                 const displaySize = {
@@ -220,62 +213,41 @@
                     height: videoRef.current.videoHeight
                 };
 
-                // 校正 Canvas 大小
                 faceapi.matchDimensions(canvasRef.current, displaySize);
 
-                // 開始即時偵測迴圈
                 const detectLoop = async () => {
                     if (videoRef.current && !videoRef.current.paused && !videoRef.current.ended) {
                         try {
-                            // 進行偵測 (Detect)
                             const detections = await faceapi.detectSingleFace(videoRef.current).withFaceLandmarks();
-                            
-                            // 清空舊的繪圖
                             const canvas = canvasRef.current;
                             const context = canvas.getContext('2d');
                             context.clearRect(0, 0, canvas.width, canvas.height);
 
                             if (detections) {
                                 setIsFaceDetected(true);
-                                // 調整偵測結果座標以符合畫面
                                 const resizedDetections = faceapi.resizeResults(detections, displaySize);
-                                
-                                // 繪製方框 (Draw Box) - 這裡我們自訂樣式讓它看起來像 HUD
                                 const box = resizedDetections.detection.box;
                                 const drawBox = new faceapi.draw.DrawBox(box, { label: 'Face Detected', boxColor: '#00ff00' });
                                 drawBox.draw(canvas);
-
-                                // 繪製特徵點 (Landmarks)
                                 faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
                             } else {
                                 setIsFaceDetected(false);
                             }
-                        } catch (e) {
-                            // 忽略瞬時錯誤
-                        }
+                        } catch (e) {}
                     }
-                    // 下一幀
                     detectionLoopRef.current = requestAnimationFrame(detectLoop);
                 };
-
                 detectLoop();
             };
 
             const capturePhoto = async () => {
                 if (!videoRef.current || !canvasRef.current) return;
-
                 const video = videoRef.current;
-                
-                // 建立一個臨時的 Canvas 來截圖
                 const tempCanvas = document.createElement('canvas');
                 tempCanvas.width = video.videoWidth;
                 tempCanvas.height = video.videoHeight;
                 const context = tempCanvas.getContext('2d');
-                
-                // 因為 CSS 有做鏡像翻轉，截圖也要翻轉才自然，但 AI 其實不介意
-                // 這裡我們直接截取原始影像 (未翻轉)，讓 AI 處理最準確
                 context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
-
                 const imgUrl = tempCanvas.toDataURL('image/jpeg');
                 
                 if (modelsLoaded) {
@@ -284,18 +256,10 @@
                     try {
                         const img = await faceapi.fetchImage(imgUrl);
                         const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-                        
                         if (detections) {
-                            setReferenceImages(prev => [
-                                ...prev, 
-                                { 
-                                    id: Date.now(), 
-                                    url: imgUrl, 
-                                    descriptor: detections.descriptor 
-                                }
-                            ]);
+                            setReferenceImages(prev => [...prev, { id: Date.now(), url: imgUrl, descriptor: detections.descriptor }]);
                             addLog("成功加入參考列表", 'success');
-                            stopCamera(); // 拍完自動關閉
+                            stopCamera();
                         } else {
                             alert("擷取時臉部特徵不清晰，請再試一次");
                         }
@@ -442,6 +406,32 @@
                 }
             };
 
+            const fetchBestImage = async (file) => {
+                // 優先嘗試: 高解析度縮圖 (通常不需要 Auth Header，且 CORS 較寬鬆)
+                if (file.thumbnailLink) {
+                    try {
+                        // s1000 代表長邊 1000px，足夠辨識且流量較小
+                        const thumbnailUrl = file.thumbnailLink.replace(/=s\d+/, '=s1000');
+                        // 直接用 faceapi 內建 fetch，不帶 Auth Header (避免 CORS 預檢失敗)
+                        const img = await faceapi.fetchImage(thumbnailUrl);
+                        return img;
+                    } catch (e) {
+                        // 若縮圖讀取失敗，靜默失敗並進入下一個 fallback
+                    }
+                }
+
+                // 後備方案: 透過 API 下載原圖 (需要 Auth Header)
+                try {
+                    const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
+                    const blobUrl = await fetchImageAsBlobUrl(fetchUrl); 
+                    const img = await faceapi.fetchImage(blobUrl);
+                    URL.revokeObjectURL(blobUrl); 
+                    return img;
+                } catch (e) {
+                    throw new Error(`Fetch failed: ${e.message}`);
+                }
+            };
+
             const downloadOriginal = async (fileId, fileName) => {
                 setDownloadingId(fileId);
                 addLog(`開始下載原圖: ${fileName}`);
@@ -580,10 +570,10 @@
                         setStatus(`分析中 (${processed}/${allFiles.length}): ${file.name}`);
                         
                         try {
-                            const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-                            const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
+                            // 改用智慧載入策略 (Thumbnail 優先 -> API 後備)
+                            const img = await fetchBestImage(file);
                             
-                            const img = await faceapi.fetchImage(blobUrl);
+                            // 稍微降低 minConfidence 以偵測較模糊的臉
                             const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 })).withFaceLandmarks().withFaceDescriptors();
                             
                             if (detections.length === 0) {
@@ -610,8 +600,6 @@
                                     });
                                 }
                             }
-                            URL.revokeObjectURL(blobUrl);
-
                         } catch (err) {
                             addLog(`[錯誤] ${file.name} - ${err.message}`, 'error');
                         }
@@ -704,7 +692,7 @@
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-bold text-gray-900">Photo Team 找相助手</h1>
-                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">即時運算版</span>
+                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">相容性增強版</span>
                                 </div>
                             </div>
                             {user && (
