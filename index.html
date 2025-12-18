@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>企業內部找相助手 (支援指定資料夾)</title>
+    <title>Photo Team 找相助手</title>
     
     <!-- 1. 引入 Tailwind CSS (樣式) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -39,10 +39,14 @@
 
         /* =============================================================================
            【設定區】
-           請確保 CLIENT_ID 正確，並在 GCP Console 設定好 "已授權的 JavaScript 來源"
+           1. CLIENT_ID: 您的 Google Cloud Client ID
+           2. TARGET_FOLDER_ID: 已填入您的 Photo Team 資料夾 ID
            =============================================================================
         */
         const CLIENT_ID = "906447546310-1np59gt29f4mssiogc2ghcdk8fje30jo.apps.googleusercontent.com"; 
+        
+        // 已填入您的資料夾 ID
+        const TARGET_FOLDER_ID = "14KF0TB3JH5yn2xtvZTeMxX0sjwnoB9iG"; 
         
         const SCOPES = "https://www.googleapis.com/auth/drive.readonly";
         const DISCOVERY_DOCS = ["https://www.googleapis.com/discovery/v1/apis/drive/v3/rest"];
@@ -65,7 +69,8 @@
             Loader2: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
             ImageIcon: (props) => <Icon {...props} d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 12l3-5 5 8H6l4-7zM21 3H3v18h18V3z" />,
             Brain: (props) => <Icon {...props} d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />,
-            Folder: (props) => <Icon {...props} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            Folder: (props) => <Icon {...props} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />,
+            Lock: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
         };
 
         // --- 主程式元件 ---
@@ -76,10 +81,10 @@
             const [gisInited, setGisInited] = useState(false);
             const [modelsLoaded, setModelsLoaded] = useState(false);
             
-            // Steps: login -> select-folder -> upload -> scanning -> results
+            // Steps: login -> (check-folder) -> upload -> scanning -> results
             const [currentStep, setCurrentStep] = useState('login'); 
-            const [folders, setFolders] = useState([]); // 資料夾列表
-            const [selectedFolder, setSelectedFolder] = useState(null); // 用戶選擇的資料夾 (null 代表全域)
+            const [folders, setFolders] = useState([]); 
+            const [selectedFolder, setSelectedFolder] = useState(null); 
             const [selectedImage, setSelectedImage] = useState(null);
             const [targetDescriptor, setTargetDescriptor] = useState(null);
             const [status, setStatus] = useState('');
@@ -131,8 +136,14 @@
                                     .then(res => res.json())
                                     .then(data => {
                                         setUser(data);
-                                        // 登入成功後，先去選擇資料夾
-                                        fetchFolders();
+                                        // 登入後邏輯分支
+                                        if (TARGET_FOLDER_ID && TARGET_FOLDER_ID.trim() !== "") {
+                                            // 有設定鎖定資料夾，直接驗證並進入上傳
+                                            verifyAndSetTargetFolder(TARGET_FOLDER_ID);
+                                        } else {
+                                            // 沒設定，讓使用者自己選
+                                            fetchFolders();
+                                        }
                                     });
                                 }
                             },
@@ -159,7 +170,25 @@
                 }
             };
 
-            // 抓取 Drive 中的資料夾列表
+            // 驗證並鎖定特定資料夾
+            const verifyAndSetTargetFolder = async (folderId) => {
+                try {
+                    const response = await window.gapi.client.drive.files.get({
+                        fileId: folderId,
+                        fields: 'id, name'
+                    });
+                    const folder = response.result;
+                    setSelectedFolder(folder);
+                    setCurrentStep('upload');
+                } catch (err) {
+                    console.error("無法存取指定資料夾", err);
+                    alert("無法存取指定的 Photo Team 資料夾。請確認您是否有權限檢視該資料夾。");
+                    setUser(null);
+                    setCurrentStep('login');
+                }
+            };
+
+            // 抓取 Drive 中的資料夾列表 (僅在無指定 TARGET_FOLDER_ID 時使用)
             const fetchFolders = async () => {
                 try {
                     const response = await window.gapi.client.drive.files.list({
@@ -222,21 +251,22 @@
                 setScanProgress(5);
 
                 try {
-                    setStatus('正在列出 Drive 中的圖片...');
+                    setStatus('正在列出資料夾中的圖片...');
                     
                     // 建構查詢語句
                     let query = "(mimeType = 'image/jpeg' or mimeType = 'image/png') and trashed = false";
                     
-                    // 如果有選擇資料夾，加入 parents 條件
+                    // 強制加入 parents 條件
                     if (selectedFolder) {
                         query += ` and '${selectedFolder.id}' in parents`;
-                        setStatus(`正在搜尋資料夾：${selectedFolder.name}...`);
+                        setStatus(`正在搜尋 Photo Team 資料夾：${selectedFolder.name}...`);
                     } else {
+                        // 如果萬一沒有 selectedFolder (全域模式)，則搜尋整個 Drive
                         setStatus(`正在搜尋整個雲端硬碟...`);
                     }
 
                     const response = await window.gapi.client.drive.files.list({
-                        'pageSize': 30, // 限制張數避免瀏覽器負載過大
+                        'pageSize': 50, 
                         'fields': "nextPageToken, files(id, name, thumbnailLink, webContentLink, createdTime)",
                         'q': query
                     });
@@ -265,7 +295,7 @@
                             try {
                                 const img = new Image();
                                 img.crossOrigin = "anonymous";
-                                img.src = file.thumbnailLink.replace('=s220', '=s1000'); // 嘗試拿大圖
+                                img.src = file.thumbnailLink.replace('=s220', '=s1000'); 
 
                                 await new Promise((resolve, reject) => {
                                     img.onload = resolve;
@@ -332,8 +362,10 @@
                                     <Icons.Brain className="w-6 h-6 text-white" />
                                 </div>
                                 <div>
-                                    <h1 className="text-xl font-bold text-gray-900">企業內部找相助手</h1>
-                                    <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">AI 增強版</span>
+                                    <h1 className="text-xl font-bold text-gray-900">Photo Team 找相助手</h1>
+                                    <span className="text-xs text-blue-600 font-medium bg-blue-50 px-2 py-0.5 rounded">
+                                        {selectedFolder ? `鎖定資料夾: ${selectedFolder.name}` : "AI 增強版"}
+                                    </span>
                                 </div>
                             </div>
                             {user && (
@@ -354,9 +386,9 @@
                                         <Icons.Shield className="w-16 h-16 text-blue-600" />
                                     </div>
                                     <div className="space-y-2 max-w-md">
-                                        <h2 className="text-2xl font-bold">安全連接您的 Google Drive</h2>
+                                        <h2 className="text-2xl font-bold">Photo Team 專用搜尋</h2>
                                         <p className="text-gray-500">
-                                            此版本已啟用真實 AI 人臉識別。請登入以存取您的雲端硬碟。
+                                            請登入以存取共享的相片資料夾。系統將自動掃描並找出屬於您的照片。
                                         </p>
                                     </div>
                                     
@@ -380,7 +412,7 @@
                                 </div>
                             )}
 
-                            {/* Step 2: Select Folder */}
+                            {/* Step 2: Select Folder (Only shown if NO target folder ID is set) */}
                             {currentStep === 'select-folder' && (
                                 <div className="flex-1 flex flex-col space-y-4 animate-[fadeIn_0.5s_ease-out]">
                                     <h2 className="text-2xl font-bold text-center mb-4">選擇搜尋範圍</h2>
@@ -424,10 +456,13 @@
                             {currentStep === 'upload' && (
                                 <div className="flex-1 flex flex-col items-center justify-center space-y-6 animate-[fadeIn_0.5s_ease-out]">
                                     <div className="w-full flex items-center justify-between">
-                                        <button onClick={() => setCurrentStep('select-folder')} className="text-sm text-gray-400 hover:text-gray-600 flex items-center">
-                                            ← 變更資料夾
-                                        </button>
-                                        <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500">
+                                        {(!TARGET_FOLDER_ID || TARGET_FOLDER_ID === "") && (
+                                            <button onClick={() => setCurrentStep('select-folder')} className="text-sm text-gray-400 hover:text-gray-600 flex items-center">
+                                                ← 變更資料夾
+                                            </button>
+                                        )}
+                                        <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 flex items-center ml-auto">
+                                            <Icons.Lock className="w-3 h-3 mr-1" />
                                             搜尋範圍: {selectedFolder ? selectedFolder.name : "整個 Drive"}
                                         </span>
                                     </div>
@@ -497,7 +532,16 @@
                                             <p className="text-gray-500">找到了 {foundPhotos.length} 張高度相似的照片</p>
                                         </div>
                                         <button 
-                                            onClick={() => { setCurrentStep('select-folder'); setFoundPhotos([]); setDriveFiles([]); }}
+                                            onClick={() => { 
+                                                // 如果有鎖定資料夾，重置回 upload
+                                                if (TARGET_FOLDER_ID && TARGET_FOLDER_ID.trim() !== "") {
+                                                    setCurrentStep('upload'); 
+                                                } else {
+                                                    setCurrentStep('select-folder');
+                                                }
+                                                setFoundPhotos([]); 
+                                                setDriveFiles([]); 
+                                            }}
                                             className="text-sm text-blue-600 hover:underline"
                                         >
                                             重新搜尋
