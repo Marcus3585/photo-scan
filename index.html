@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (高準確度版)</title>
+    <title>Photo Team 找相助手 (即時運算版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -20,6 +20,8 @@
         }
         .animate-scan { animation: scan 2s linear infinite; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
+        /* 鏡像翻轉 */
+        .video-mirror { transform: scaleX(-1); }
     </style>
 </head>
 <body class="bg-gray-100 font-sans text-gray-800">
@@ -60,7 +62,10 @@
             Shortcut: (props) => <Icon {...props} d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />,
             Plus: (props) => <Icon {...props} d="M12 5v14M5 12h14" />,
             Trash: (props) => <Icon {...props} d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
-            Settings: (props) => <Icon {...props} d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
+            Settings: (props) => <Icon {...props} d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />,
+            X: (props) => <Icon {...props} d="M18 6L6 18M6 6l12 12" />,
+            CheckCircle: (props) => <Icon {...props} d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />,
+            Face: (props) => <Icon {...props} d="M9 10h.01M15 10h.01M12 15a2 2 0 0 0-2-2 2 2 0 0 0-2 2" />
         };
 
         function App() {
@@ -71,20 +76,23 @@
             const [gisInited, setGisInited] = useState(false);
             const [modelsLoaded, setModelsLoaded] = useState(false);
             
-            // Steps: login -> navigate-folder -> upload -> scanning -> results
             const [currentStep, setCurrentStep] = useState('login'); 
-            
-            // Navigation State
             const [navStack, setNavStack] = useState([]); 
             const [currentSubFolders, setCurrentSubFolders] = useState([]); 
             const [loadingFolders, setLoadingFolders] = useState(false);
-
             const [selectedFolder, setSelectedFolder] = useState(null); 
             
-            // --- Multi-Reference State ---
-            const [referenceImages, setReferenceImages] = useState([]); // Array of { id, url, descriptor }
-            const [threshold, setThreshold] = useState(0.5); // Default 0.5
+            const [referenceImages, setReferenceImages] = useState([]); 
+            const [threshold, setThreshold] = useState(0.5); 
             
+            // Camera & Live Detection State
+            const [showCamera, setShowCamera] = useState(false);
+            const videoRef = useRef(null);
+            const canvasRef = useRef(null);
+            const [isCameraLoading, setIsCameraLoading] = useState(false);
+            const [isFaceDetected, setIsFaceDetected] = useState(false);
+            const detectionLoopRef = useRef(null); // 用於儲存 requestAnimationFrame ID
+
             const [status, setStatus] = useState('');
             const [errorMessage, setErrorMessage] = useState(null);
             const [foundPhotos, setFoundPhotos] = useState([]);
@@ -109,6 +117,7 @@
                 const loadModels = async () => {
                     try {
                         addLog("開始載入 AI 模型...", 'info');
+                        // 載入 SSD Mobilenet (較準確) 或 Tiny Face Detector (較快)
                         await faceapi.nets.ssdMobilenetv1.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceLandmark68Net.loadFromUri(MODEL_URL);
                         await faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL);
@@ -161,6 +170,142 @@
                     clearInterval(checkGisLoaded);
                 }
             }, []);
+
+            // --- Camera & Live Detection Logic ---
+            const startCamera = async () => {
+                setShowCamera(true);
+                setIsCameraLoading(true);
+                setIsFaceDetected(false);
+                try {
+                    const stream = await navigator.mediaDevices.getUserMedia({ video: {} });
+                    if (videoRef.current) {
+                        videoRef.current.srcObject = stream;
+                    }
+                    addLog("相機已啟動，準備進行即時運算...");
+                } catch (err) {
+                    console.error("Camera Error:", err);
+                    alert("無法啟動相機，請檢查權限設定。");
+                    setShowCamera(false);
+                } finally {
+                    setIsCameraLoading(false);
+                }
+            };
+
+            const stopCamera = () => {
+                // 停止即時偵測迴圈
+                if (detectionLoopRef.current) {
+                    cancelAnimationFrame(detectionLoopRef.current);
+                    detectionLoopRef.current = null;
+                }
+
+                // 停止相機串流
+                if (videoRef.current && videoRef.current.srcObject) {
+                    const tracks = videoRef.current.srcObject.getTracks();
+                    tracks.forEach(track => track.stop());
+                    videoRef.current.srcObject = null;
+                }
+                setShowCamera(false);
+                setIsFaceDetected(false);
+            };
+
+            // 當 Video 開始播放時觸發 (onPlay)
+            const handleVideoOnPlay = () => {
+                if (!videoRef.current || !canvasRef.current) return;
+                
+                // 確保 AI 模型已載入
+                if (!modelsLoaded) return;
+
+                const displaySize = {
+                    width: videoRef.current.videoWidth,
+                    height: videoRef.current.videoHeight
+                };
+
+                // 校正 Canvas 大小
+                faceapi.matchDimensions(canvasRef.current, displaySize);
+
+                // 開始即時偵測迴圈
+                const detectLoop = async () => {
+                    if (videoRef.current && !videoRef.current.paused && !videoRef.current.ended) {
+                        try {
+                            // 進行偵測 (Detect)
+                            const detections = await faceapi.detectSingleFace(videoRef.current).withFaceLandmarks();
+                            
+                            // 清空舊的繪圖
+                            const canvas = canvasRef.current;
+                            const context = canvas.getContext('2d');
+                            context.clearRect(0, 0, canvas.width, canvas.height);
+
+                            if (detections) {
+                                setIsFaceDetected(true);
+                                // 調整偵測結果座標以符合畫面
+                                const resizedDetections = faceapi.resizeResults(detections, displaySize);
+                                
+                                // 繪製方框 (Draw Box) - 這裡我們自訂樣式讓它看起來像 HUD
+                                const box = resizedDetections.detection.box;
+                                const drawBox = new faceapi.draw.DrawBox(box, { label: 'Face Detected', boxColor: '#00ff00' });
+                                drawBox.draw(canvas);
+
+                                // 繪製特徵點 (Landmarks)
+                                faceapi.draw.drawFaceLandmarks(canvas, resizedDetections);
+                            } else {
+                                setIsFaceDetected(false);
+                            }
+                        } catch (e) {
+                            // 忽略瞬時錯誤
+                        }
+                    }
+                    // 下一幀
+                    detectionLoopRef.current = requestAnimationFrame(detectLoop);
+                };
+
+                detectLoop();
+            };
+
+            const capturePhoto = async () => {
+                if (!videoRef.current || !canvasRef.current) return;
+
+                const video = videoRef.current;
+                
+                // 建立一個臨時的 Canvas 來截圖
+                const tempCanvas = document.createElement('canvas');
+                tempCanvas.width = video.videoWidth;
+                tempCanvas.height = video.videoHeight;
+                const context = tempCanvas.getContext('2d');
+                
+                // 因為 CSS 有做鏡像翻轉，截圖也要翻轉才自然，但 AI 其實不介意
+                // 這裡我們直接截取原始影像 (未翻轉)，讓 AI 處理最準確
+                context.drawImage(video, 0, 0, tempCanvas.width, tempCanvas.height);
+
+                const imgUrl = tempCanvas.toDataURL('image/jpeg');
+                
+                if (modelsLoaded) {
+                    setIsCameraLoading(true); 
+                    addLog("正在提取特徵...");
+                    try {
+                        const img = await faceapi.fetchImage(imgUrl);
+                        const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                        
+                        if (detections) {
+                            setReferenceImages(prev => [
+                                ...prev, 
+                                { 
+                                    id: Date.now(), 
+                                    url: imgUrl, 
+                                    descriptor: detections.descriptor 
+                                }
+                            ]);
+                            addLog("成功加入參考列表", 'success');
+                            stopCamera(); // 拍完自動關閉
+                        } else {
+                            alert("擷取時臉部特徵不清晰，請再試一次");
+                        }
+                    } catch (err) {
+                        addLog("相機照片分析失敗: " + err.message, 'error');
+                    } finally {
+                        setIsCameraLoading(false);
+                    }
+                }
+            };
 
             const handleLogin = () => {
                 if (CLIENT_ID.includes("YOUR_CLIENT_ID")) {
@@ -253,38 +398,24 @@
                 setCurrentStep('upload');
             };
 
-            // --- Multi-Reference Logic ---
             const handleAddReferenceImage = async (event) => {
                 const file = event.target.files[0];
                 if (!file) return;
-                
-                // Clear input value so same file can be selected again
                 event.target.value = '';
-
                 const reader = new FileReader();
                 reader.onload = async (e) => {
                     const imgUrl = e.target.result;
-                    
                     if (modelsLoaded) {
                         setStatus("正在分析照片特徵...");
                         try {
                             const img = await faceapi.fetchImage(imgUrl);
                             const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-                            
                             if (detections) {
-                                setReferenceImages(prev => [
-                                    ...prev, 
-                                    { 
-                                        id: Date.now(), 
-                                        url: imgUrl, 
-                                        descriptor: detections.descriptor 
-                                    }
-                                ]);
+                                setReferenceImages(prev => [...prev, { id: Date.now(), url: imgUrl, descriptor: detections.descriptor }]);
                                 setStatus("照片已加入參考列表！");
                                 addLog("成功提取臉部特徵並加入列表", 'success');
                             } else {
                                 alert("無法在圖片中檢測到人臉，請換一張清晰的正面照。");
-                                addLog("上傳圖片中未檢測到人臉", 'warn');
                             }
                         } catch (err) {
                             addLog("分析上傳圖片失敗: " + err.message, 'error');
@@ -453,25 +584,19 @@
                             const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
                             
                             const img = await faceapi.fetchImage(blobUrl);
-                            // 稍微降低 minConfidence 以偵測較模糊的臉
                             const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 })).withFaceLandmarks().withFaceDescriptors();
                             
                             if (detections.length === 0) {
                                 // addLog(`[無人臉] ${file.name}`);
                             } else {
-                                // 比對邏輯：這張照片裡的任何一張臉，是否像我們參考圖庫裡的任何一張臉？
                                 let bestMatchDistance = 1.0; 
-                                
-                                // 針對照片裡的每一張臉 (d)
                                 detections.forEach(d => {
-                                    // 針對參考圖庫裡的每一張臉 (ref)
                                     referenceImages.forEach(ref => {
                                         const dist = faceapi.euclideanDistance(ref.descriptor, d.descriptor);
                                         if (dist < bestMatchDistance) bestMatchDistance = dist;
                                     });
                                 });
 
-                                // 使用用戶設定的 Threshold (0.1 ~ 0.9)
                                 const isMatch = bestMatchDistance < threshold;
                                 
                                 if (isMatch) {
@@ -516,7 +641,59 @@
             }
 
             return (
-                <div className="min-h-screen p-4 md:p-8 flex flex-col items-center">
+                <div className="min-h-screen p-4 md:p-8 flex flex-col items-center relative">
+                    {/* Camera Modal */}
+                    {showCamera && (
+                        <div className="fixed inset-0 bg-black bg-opacity-90 z-50 flex flex-col items-center justify-center p-4">
+                            <div className="w-full max-w-lg bg-black rounded-2xl overflow-hidden relative shadow-2xl border border-gray-800">
+                                {/* Video Container */}
+                                <div className="relative">
+                                    <video 
+                                        ref={videoRef} 
+                                        onPlay={handleVideoOnPlay}
+                                        autoPlay 
+                                        muted
+                                        playsInline 
+                                        className="w-full h-auto video-mirror" // CSS 鏡像
+                                    ></video>
+                                    <canvas 
+                                        ref={canvasRef} 
+                                        className="absolute top-0 left-0 w-full h-full video-mirror" // Canvas 也要鏡像才能對齊
+                                    ></canvas>
+                                </div>
+                                
+                                <button 
+                                    onClick={stopCamera}
+                                    className="absolute top-4 right-4 bg-black/50 text-white p-2 rounded-full hover:bg-black/70 backdrop-blur-sm"
+                                >
+                                    <Icons.X className="w-6 h-6" />
+                                </button>
+
+                                <div className="absolute bottom-0 left-0 right-0 p-6 bg-gradient-to-t from-black/80 to-transparent flex flex-col items-center">
+                                    <p className={`text-sm mb-4 font-medium ${isFaceDetected ? 'text-green-400' : 'text-gray-400'}`}>
+                                        {isFaceDetected ? "已鎖定人臉 - 可拍照" : "請將臉部置於畫面中央"}
+                                    </p>
+                                    
+                                    <button 
+                                        onClick={capturePhoto}
+                                        disabled={isCameraLoading || !isFaceDetected} // 只有偵測到臉才給拍
+                                        className={`rounded-full w-16 h-16 flex items-center justify-center border-4 transition-all transform active:scale-95 ${
+                                            isFaceDetected 
+                                                ? 'bg-white border-green-500 hover:bg-green-50 scale-110 shadow-[0_0_15px_rgba(34,197,94,0.5)]' 
+                                                : 'bg-gray-200 border-gray-400 cursor-not-allowed opacity-50'
+                                        }`}
+                                    >
+                                        {isCameraLoading ? (
+                                            <Icons.Loader2 className="w-8 h-8 text-blue-500 animate-spin" />
+                                        ) : (
+                                            <div className={`w-12 h-12 rounded-full transition-colors ${isFaceDetected ? 'bg-green-500' : 'bg-gray-400'}`}></div>
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     <div className="w-full max-w-3xl bg-white rounded-2xl shadow-xl overflow-hidden min-h-[600px] flex flex-col mb-8">
                         
                         {/* Header */}
@@ -527,7 +704,7 @@
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-bold text-gray-900">Photo Team 找相助手</h1>
-                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">高準確度版</span>
+                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">即時運算版</span>
                                 </div>
                             </div>
                             {user && (
@@ -559,7 +736,6 @@
                             {/* Folder Navigation */}
                             {currentStep === 'navigate-folder' && (
                                 <div className="flex-1 flex flex-col space-y-4 animate-[fadeIn_0.5s_ease-out]">
-                                    {/* Breadcrumbs */}
                                     <div className="flex items-center space-x-2 text-sm text-gray-500 mb-2 overflow-x-auto whitespace-nowrap pb-2">
                                         <Icons.Home className="w-4 h-4" />
                                         {navStack.map((folder, index) => (
@@ -575,7 +751,6 @@
                                         ))}
                                     </div>
 
-                                    {/* Folder List */}
                                     <div className="flex-1 border rounded-xl overflow-hidden flex flex-col bg-white">
                                         <div className="bg-gray-50 p-3 border-b text-sm font-bold text-gray-500 flex justify-between items-center">
                                             <span>選擇子資料夾</span>
@@ -610,7 +785,6 @@
                                         </div>
                                     </div>
 
-                                    {/* Confirm Selection Button */}
                                     <div className="pt-2">
                                         <button 
                                             onClick={handleConfirmFolder}
@@ -639,7 +813,7 @@
                                     
                                     <div className="text-center space-y-2">
                                         <h2 className="text-2xl font-bold">建立參考圖庫</h2>
-                                        <p className="text-gray-500 text-sm">上傳越多不同角度/表情的照片，辨識越準確</p>
+                                        <p className="text-gray-500 text-sm">請上傳照片或使用相機，建議多個角度</p>
                                     </div>
 
                                     {/* Reference Images List */}
@@ -656,10 +830,19 @@
                                             </div>
                                         ))}
                                         
-                                        {/* Add Button */}
-                                        <label className="relative aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                                        {/* Camera Button */}
+                                        <button 
+                                            onClick={startCamera}
+                                            className="relative aspect-square rounded-lg border-2 border-dashed border-blue-300 bg-blue-50 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-100 transition-colors"
+                                        >
+                                            <Icons.Camera className="w-8 h-8 text-blue-500 mb-1" />
+                                            <span className="text-xs text-blue-600 font-bold">開啟相機</span>
+                                        </button>
+
+                                        {/* File Upload Button */}
+                                        <label className="relative aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-gray-400 hover:bg-gray-50 transition-colors">
                                             <Icons.Plus className="w-8 h-8 text-gray-400 mb-1" />
-                                            <span className="text-xs text-gray-500 font-medium">加入照片</span>
+                                            <span className="text-xs text-gray-500 font-medium">上傳照片</span>
                                             <input type="file" className="hidden" accept="image/*" onChange={handleAddReferenceImage} />
                                         </label>
                                     </div>
