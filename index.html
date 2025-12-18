@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (相容性增強版)</title>
+    <title>Photo Team 找相助手 (最終修復版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -20,7 +20,6 @@
         }
         .animate-scan { animation: scan 2s linear infinite; }
         .scrollbar-hide::-webkit-scrollbar { display: none; }
-        /* 鏡像翻轉 */
         .video-mirror { transform: scaleX(-1); }
     </style>
 </head>
@@ -85,7 +84,6 @@
             const [referenceImages, setReferenceImages] = useState([]); 
             const [threshold, setThreshold] = useState(0.5); 
             
-            // Camera & Live Detection State
             const [showCamera, setShowCamera] = useState(false);
             const videoRef = useRef(null);
             const canvasRef = useRef(null);
@@ -406,29 +404,46 @@
                 }
             };
 
+            // Helper to load image via HTMLImageElement (Robust for CORS thumbnails)
+            const loadImage = (url) => {
+                return new Promise((resolve, reject) => {
+                    const img = new Image();
+                    img.crossOrigin = "anonymous"; 
+                    img.onload = () => resolve(img);
+                    img.onerror = (e) => reject(new Error(`Image load error`));
+                    img.src = url;
+                });
+            };
+
             const fetchBestImage = async (file) => {
-                // 優先嘗試: 高解析度縮圖 (通常不需要 Auth Header，且 CORS 較寬鬆)
+                // Strategy 1: Try Thumbnail via <img> tag (Google CDN is usually CORS friendly)
                 if (file.thumbnailLink) {
                     try {
-                        // s1000 代表長邊 1000px，足夠辨識且流量較小
-                        const thumbnailUrl = file.thumbnailLink.replace(/=s\d+/, '=s1000');
-                        // 直接用 faceapi 內建 fetch，不帶 Auth Header (避免 CORS 預檢失敗)
-                        const img = await faceapi.fetchImage(thumbnailUrl);
-                        return img;
+                        let thumbUrl = file.thumbnailLink;
+                        // Force high resolution if parameter exists, or append if not
+                        if (thumbUrl.indexOf('=s') > -1) {
+                            thumbUrl = thumbUrl.replace(/=s\d+/, '=s1000');
+                        } else {
+                            thumbUrl += '=s1000';
+                        }
+                        
+                        return await loadImage(thumbUrl);
                     } catch (e) {
-                        // 若縮圖讀取失敗，靜默失敗並進入下一個 fallback
+                        // Silent fail, try fallback
                     }
                 }
 
-                // 後備方案: 透過 API 下載原圖 (需要 Auth Header)
+                // Strategy 2: API Download (Reliable but slower, needs Token)
                 try {
                     const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
                     const blobUrl = await fetchImageAsBlobUrl(fetchUrl); 
-                    const img = await faceapi.fetchImage(blobUrl);
-                    URL.revokeObjectURL(blobUrl); 
+                    const img = await loadImage(blobUrl);
+                    
+                    // Attach blobUrl to img to revoke later
+                    img._blobUrl = blobUrl; 
                     return img;
                 } catch (e) {
-                    throw new Error(`Fetch failed: ${e.message}`);
+                    throw new Error(`All loading methods failed: ${e.message}`);
                 }
             };
 
@@ -570,12 +585,16 @@
                         setStatus(`分析中 (${processed}/${allFiles.length}): ${file.name}`);
                         
                         try {
-                            // 改用智慧載入策略 (Thumbnail 優先 -> API 後備)
                             const img = await fetchBestImage(file);
                             
                             // 稍微降低 minConfidence 以偵測較模糊的臉
                             const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 })).withFaceLandmarks().withFaceDescriptors();
                             
+                            // Clean up blob if exists
+                            if (img._blobUrl) {
+                                URL.revokeObjectURL(img._blobUrl);
+                            }
+
                             if (detections.length === 0) {
                                 // addLog(`[無人臉] ${file.name}`);
                             } else {
