@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (Debug除錯版)</title>
+    <title>Photo Team 找相助手 (支援子資料夾)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -42,35 +42,38 @@
         const Icons = {
             Cloud: (props) => <Icon {...props} d="M17.5 19c0-3.037-2.463-5.5-5.5-5.5S6.5 15.963 6.5 19H5c-1.105 0-2-.895-2-2 0-.46.147-.887.397-1.235C2.47 14.88 2 13.565 2 12c0-3.313 2.687-6 6-6 .56 0 1.096.078 1.605.223C10.66 4.093 13.1 2.5 16 2.5c3.313 0 6 2.687 6 6 0 .53-.07 1.04-.198 1.527C23.033 10.975 23.5 12.18 23.5 13.5c0 1.933-1.567 3.5-3.5 3.5h-2.5z" />,
             Shield: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-            AlertCircle: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>,
+            AlertCircle: (props) => <Icon {...props} d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01" />,
             Camera: (props) => <Icon {...props} d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z M12 13a4 4 0 1 0 0-8 4 4 0 0 0 0 8z" />,
             Search: (props) => <Icon {...props} d="M21 21l-6-6m2-5a7 7 0 1 1-14 0 7 7 0 0 1 14 0z" />,
             Loader2: (props) => <svg {...props} xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>,
             ImageIcon: (props) => <Icon {...props} d="M19 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2zm-9 12l3-5 5 8H6l4-7zM21 3H3v18h18V3z" />,
             Brain: (props) => <Icon {...props} d="M9.5 2A2.5 2.5 0 0 1 12 4.5v15a2.5 2.5 0 0 1-4.96.44 2.5 2.5 0 0 1-2.96-3.08 3 3 0 0 1-.34-5.58 2.5 2.5 0 0 1 1.32-4.24 2.5 2.5 0 0 1 1.98-3A2.5 2.5 0 0 1 9.5 2Z M14.5 2A2.5 2.5 0 0 0 12 4.5v15a2.5 2.5 0 0 0 4.96.44 2.5 2.5 0 0 0 2.96-3.08 3 3 0 0 0 .34-5.58 2.5 2.5 0 0 0-1.32-4.24 2.5 2.5 0 0 0-1.98-3A2.5 2.5 0 0 0 14.5 2Z" />,
             Lock: (props) => <Icon {...props} d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />,
-            Terminal: (props) => <Icon {...props} d="M4 17l6-6-6-6M12 19h8" />
+            Terminal: (props) => <Icon {...props} d="M4 17l6-6-6-6M12 19h8" />,
+            Folder: (props) => <Icon {...props} d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
         };
 
         function App() {
             const [user, setUser] = useState(null);
-            const [accessToken, setAccessToken] = useState(null); // 新增：儲存 Token 用於下載圖片
+            const [accessToken, setAccessToken] = useState(null);
             const [tokenClient, setTokenClient] = useState(null);
             const [gapiInited, setGapiInited] = useState(false);
             const [gisInited, setGisInited] = useState(false);
             const [modelsLoaded, setModelsLoaded] = useState(false);
             
+            // Steps: login -> select-subfolder -> upload -> scanning -> results
             const [currentStep, setCurrentStep] = useState('login'); 
-            const [selectedFolder, setSelectedFolder] = useState(null); 
+            const [rootFolder, setRootFolder] = useState(null); // Photo Team 本身
+            const [subFolders, setSubFolders] = useState([]);   // Photo Team 內的子資料夾
+            const [selectedFolder, setSelectedFolder] = useState(null); // 用戶最終選擇的資料夾
             const [selectedImage, setSelectedImage] = useState(null);
             const [targetDescriptor, setTargetDescriptor] = useState(null);
             const [status, setStatus] = useState('');
             const [errorMessage, setErrorMessage] = useState(null);
             const [foundPhotos, setFoundPhotos] = useState([]);
             const [scanProgress, setScanProgress] = useState(0);
-            const [debugLogs, setDebugLogs] = useState([]); // 新增：Debug 日誌
+            const [debugLogs, setDebugLogs] = useState([]);
 
-            // 輔助：寫入 Log
             const addLog = (msg, type = 'info') => {
                 const time = new Date().toLocaleTimeString();
                 setDebugLogs(prev => [`[${time}] ${msg}`, ...prev]);
@@ -112,7 +115,7 @@
                             scope: SCOPES,
                             callback: (tokenResponse) => {
                                 if (tokenResponse && tokenResponse.access_token) {
-                                    setAccessToken(tokenResponse.access_token); // 儲存 Token
+                                    setAccessToken(tokenResponse.access_token);
                                     fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
                                         headers: { Authorization: `Bearer ${tokenResponse.access_token}` }
                                     })
@@ -121,7 +124,7 @@
                                         setUser(data);
                                         addLog(`使用者登入: ${data.name}`);
                                         if (TARGET_FOLDER_ID && TARGET_FOLDER_ID.trim() !== "") {
-                                            verifyAndSetTargetFolder(TARGET_FOLDER_ID);
+                                            initPhotoTeamFolder(TARGET_FOLDER_ID);
                                         }
                                     });
                                 }
@@ -148,20 +151,41 @@
                 if (tokenClient) tokenClient.requestAccessToken();
             };
 
-            const verifyAndSetTargetFolder = async (folderId) => {
+            // 初始化 Photo Team 資料夾並讀取子資料夾
+            const initPhotoTeamFolder = async (folderId) => {
                 try {
-                    addLog(`正在驗證資料夾 ID: ${folderId}`);
+                    addLog(`正在初始化 Photo Team 資料夾: ${folderId}`);
+                    // 1. 獲取根資料夾資訊
                     const response = await window.gapi.client.drive.files.get({
                         fileId: folderId,
-                        fields: 'id, name, webViewLink',
+                        fields: 'id, name',
                         supportsAllDrives: true
                     });
-                    setSelectedFolder(response.result);
-                    addLog(`成功鎖定資料夾: ${response.result.name}`);
-                    setCurrentStep('upload');
+                    const root = response.result;
+                    setRootFolder(root);
+                    addLog(`確認資料夾: ${root.name}`);
+
+                    // 2. 獲取子資料夾列表
+                    addLog("正在讀取子資料夾列表...");
+                    const listResp = await window.gapi.client.drive.files.list({
+                        'pageSize': 100,
+                        'fields': "nextPageToken, files(id, name)",
+                        'q': `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+                        'orderBy': 'name',
+                        supportsAllDrives: true,
+                        includeItemsFromAllDrives: true
+                    });
+                    
+                    const subs = listResp.result.files || [];
+                    setSubFolders(subs);
+                    addLog(`找到 ${subs.length} 個子資料夾`);
+
+                    // 3. 進入選擇資料夾步驟
+                    setCurrentStep('select-subfolder');
+
                 } catch (err) {
-                    addLog(`無法存取資料夾: ${err.status}`, 'error');
-                    setErrorMessage(`無法存取指定資料夾 (${err.status})。請確認權限。`);
+                    addLog(`初始化失敗: ${err.status}`, 'error');
+                    setErrorMessage(`無法存取 Photo Team 資料夾。請確認 ID 與權限。`);
                     setUser(null);
                     setCurrentStep('login');
                 }
@@ -198,13 +222,10 @@
                 }
             };
 
-            // 關鍵函數：使用 Token 下載圖片並轉換為 Blob URL (解決 CORS)
             const fetchImageAsBlobUrl = async (url) => {
                 try {
                     const response = await fetch(url, {
-                        headers: {
-                            'Authorization': `Bearer ${accessToken}` // 加上 Token
-                        }
+                        headers: { 'Authorization': `Bearer ${accessToken}` }
                     });
                     if (!response.ok) throw new Error(`HTTP ${response.status}`);
                     const blob = await response.blob();
@@ -220,18 +241,24 @@
                 setCurrentStep('scanning');
                 setStatus('正在連接 Google Drive...');
                 setScanProgress(5);
-                setDebugLogs([]); // 清空舊日誌
+                setDebugLogs([]);
                 setFoundPhotos([]);
-                addLog("開始新搜尋任務...");
+                addLog("開始搜尋任務...");
 
                 try {
+                    // 根據用戶選擇，決定搜尋範圍
                     let query = "mimeType contains 'image/' and trashed = false";
-                    if (selectedFolder) {
-                        query += ` and '${selectedFolder.id}' in parents`;
-                    }
+                    
+                    // 如果選擇了具體子資料夾，就搜那個；否則搜根目錄
+                    const targetId = selectedFolder ? selectedFolder.id : rootFolder.id;
+                    const targetName = selectedFolder ? selectedFolder.name : rootFolder.name;
+                    
+                    query += ` and '${targetId}' in parents`;
+                    
+                    addLog(`搜尋目標: ${targetName} (${targetId})`);
 
                     const response = await window.gapi.client.drive.files.list({
-                        'pageSize': 30, // 限制 30 張以方便除錯
+                        'pageSize': 50, 
                         'fields': "nextPageToken, files(id, name, thumbnailLink, webContentLink, createdTime)",
                         'q': query,
                         supportsAllDrives: true,
@@ -247,7 +274,7 @@
                         return;
                     }
 
-                    addLog(`找到 ${files.length} 個檔案，開始逐一比對...`);
+                    addLog(`找到 ${files.length} 個檔案，開始比對...`);
                     setStatus(`正在比對 ${files.length} 張照片...`);
                     
                     let processed = 0;
@@ -260,12 +287,7 @@
                         setStatus(`分析中: ${file.name}`);
                         
                         try {
-                            // 【關鍵修正】: 
-                            // 舊方式: 用 thumbnailLink (容易被 CORS 擋)
-                            // 新方式: 用 Google Drive API 的 'media' 下載點 (支援 Token 驗證)
                             const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
-                            
-                            // 使用帶 Token 的 fetch 下載圖片數據
                             const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
                             
                             const img = await faceapi.fetchImage(blobUrl);
@@ -280,21 +302,18 @@
                                     if (dist < bestDist) bestDist = dist;
                                 });
 
-                                // 顯示每張照片的最佳距離 (越小越像)
                                 const isMatch = bestDist < 0.55; 
                                 addLog(`[${isMatch ? '匹配' : '不符'}] ${file.name} - 距離: ${bestDist.toFixed(4)}`);
 
                                 if (isMatch) {
                                     matches.push({
                                         id: file.id,
-                                        url: file.thumbnailLink, // 顯示用原縮圖連結
+                                        url: file.thumbnailLink,
                                         name: file.name,
                                         score: Math.floor((1 - bestDist) * 100)
                                     });
                                 }
                             }
-                            
-                            // 釋放記憶體
                             URL.revokeObjectURL(blobUrl);
 
                         } catch (err) {
@@ -310,7 +329,7 @@
                 } catch (err) {
                     console.error(err);
                     setErrorMessage(err.message);
-                    addLog("搜尋過程發生致命錯誤: " + err.message, 'error');
+                    addLog("搜尋錯誤: " + err.message, 'error');
                     setTimeout(() => setCurrentStep('upload'), 5000);
                 }
             };
@@ -358,7 +377,7 @@
                                     <Icons.Shield className="w-16 h-16 text-blue-600" />
                                     <div className="space-y-2 max-w-md">
                                         <h2 className="text-2xl font-bold">Photo Team 專用搜尋</h2>
-                                        <p className="text-gray-500">Debug 版：將顯示詳細掃描日誌</p>
+                                        <p className="text-gray-500">登入後將自動列出子資料夾</p>
                                     </div>
                                     {errorMessage && <div className="bg-red-50 text-red-600 p-3 rounded">{errorMessage}</div>}
                                     <button onClick={handleLogin} className="bg-blue-600 hover:bg-blue-700 text-white text-lg font-semibold py-3 px-8 rounded-xl flex items-center shadow-lg">
@@ -367,13 +386,59 @@
                                 </div>
                             )}
 
+                            {/* Select Subfolder */}
+                            {currentStep === 'select-subfolder' && (
+                                <div className="flex-1 flex flex-col space-y-4 animate-[fadeIn_0.5s_ease-out]">
+                                    <div className="text-center mb-4">
+                                        <h2 className="text-2xl font-bold">選擇活動相簿</h2>
+                                        <p className="text-gray-500 text-sm mt-1">目前鎖定：{rootFolder?.name}</p>
+                                    </div>
+                                    
+                                    <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2">
+                                        {/* 選項：根目錄 */}
+                                        <div 
+                                            onClick={() => { setSelectedFolder(null); setCurrentStep('upload'); }}
+                                            className="flex items-center p-4 rounded-xl border-2 border-dashed border-gray-300 hover:border-blue-500 hover:bg-blue-50 cursor-pointer transition-all bg-gray-50"
+                                        >
+                                            <div className="bg-gray-200 p-2 rounded-lg mr-4">
+                                                <Icons.Cloud className="w-6 h-6 text-gray-600" />
+                                            </div>
+                                            <div>
+                                                <p className="font-bold text-gray-800">搜尋整個「{rootFolder?.name}」根目錄</p>
+                                                <p className="text-xs text-gray-500">不包含子資料夾，僅搜尋最外層照片</p>
+                                            </div>
+                                        </div>
+
+                                        <p className="text-sm text-gray-500 font-bold mt-4 px-2">或選擇子活動資料夾：</p>
+                                        
+                                        {subFolders.length === 0 ? (
+                                            <p className="text-center text-gray-400 py-4">此資料夾內沒有子資料夾</p>
+                                        ) : (
+                                            subFolders.map(folder => (
+                                                <div 
+                                                    key={folder.id}
+                                                    onClick={() => { setSelectedFolder(folder); setCurrentStep('upload'); }}
+                                                    className="flex items-center p-3 rounded-xl border border-gray-100 hover:bg-gray-100 cursor-pointer transition-all"
+                                                >
+                                                    <Icons.Folder className="w-5 h-5 text-blue-500 mr-3" />
+                                                    <span className="text-gray-700 font-medium truncate">{folder.name}</span>
+                                                </div>
+                                            ))
+                                        )}
+                                    </div>
+                                </div>
+                            )}
+
                             {/* Upload */}
                             {currentStep === 'upload' && (
                                 <div className="flex-1 flex flex-col items-center justify-center space-y-6">
-                                    <div className="w-full flex justify-end">
+                                    <div className="w-full flex justify-between items-center">
+                                         <button onClick={() => setCurrentStep('select-subfolder')} className="text-sm text-gray-400 hover:text-gray-600 flex items-center">
+                                            ← 選擇其他資料夾
+                                        </button>
                                         <span className="text-xs bg-gray-100 px-2 py-1 rounded text-gray-500 flex items-center">
                                             <Icons.Lock className="w-3 h-3 mr-1" />
-                                            {selectedFolder ? selectedFolder.name : "..."}
+                                            {selectedFolder ? selectedFolder.name : rootFolder?.name}
                                         </span>
                                     </div>
                                     <h2 className="text-2xl font-bold">上傳目標照片</h2>
