@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手 (資料夾導航版)</title>
+    <title>Photo Team 找相助手 (高準確度版)</title>
     
     <script src="https://cdn.tailwindcss.com"></script>
     <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
@@ -56,7 +56,11 @@
             Stop: (props) => <Icon {...props} d="M9 9h6v6H9z M21 12a9 9 0 1 1-6.219-8.56" />,
             ArrowRight: (props) => <Icon {...props} d="M9 18l6-6-6-6" />,
             ArrowLeft: (props) => <Icon {...props} d="M15 18l-6-6 6-6" />,
-            Home: (props) => <Icon {...props} d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z 9 22 9 12 15 12 15 22" />
+            Home: (props) => <Icon {...props} d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z 9 22 9 12 15 12 15 22" />,
+            Shortcut: (props) => <Icon {...props} d="M15 3h6v6M10 14L21 3M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />,
+            Plus: (props) => <Icon {...props} d="M12 5v14M5 12h14" />,
+            Trash: (props) => <Icon {...props} d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />,
+            Settings: (props) => <Icon {...props} d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.74v-.47a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" />
         };
 
         function App() {
@@ -71,13 +75,16 @@
             const [currentStep, setCurrentStep] = useState('login'); 
             
             // Navigation State
-            const [navStack, setNavStack] = useState([]); // 資料夾路徑堆疊 [{id, name}, ...]
-            const [currentSubFolders, setCurrentSubFolders] = useState([]); // 當前層級的子資料夾
+            const [navStack, setNavStack] = useState([]); 
+            const [currentSubFolders, setCurrentSubFolders] = useState([]); 
             const [loadingFolders, setLoadingFolders] = useState(false);
 
-            const [selectedFolder, setSelectedFolder] = useState(null); // 最終選擇的資料夾
-            const [selectedImage, setSelectedImage] = useState(null);
-            const [targetDescriptor, setTargetDescriptor] = useState(null);
+            const [selectedFolder, setSelectedFolder] = useState(null); 
+            
+            // --- Multi-Reference State ---
+            const [referenceImages, setReferenceImages] = useState([]); // Array of { id, url, descriptor }
+            const [threshold, setThreshold] = useState(0.5); // Default 0.5
+            
             const [status, setStatus] = useState('');
             const [errorMessage, setErrorMessage] = useState(null);
             const [foundPhotos, setFoundPhotos] = useState([]);
@@ -164,25 +171,18 @@
                 if (tokenClient) tokenClient.requestAccessToken();
             };
 
-            // 初始化根資料夾 (Photo Team)
             const initRootFolder = async (folderId) => {
                 try {
                     addLog(`初始化資料夾 ID: ${folderId}`);
-                    // 1. 獲取根資料夾資訊
                     const response = await window.gapi.client.drive.files.get({
                         fileId: folderId,
                         fields: 'id, name',
                         supportsAllDrives: true
                     });
                     const root = response.result;
-                    
-                    // 設定初始路徑
                     setNavStack([root]);
-                    
-                    // 獲取該層子資料夾
                     await fetchSubfolders(root.id);
                     setCurrentStep('navigate-folder');
-
                 } catch (err) {
                     addLog(`初始化失敗: ${err.status}`, 'error');
                     setErrorMessage(`無法存取 Photo Team 資料夾。請確認 ID 與權限。`);
@@ -191,21 +191,36 @@
                 }
             };
 
-            // 讀取特定資料夾的子資料夾
             const fetchSubfolders = async (parentId) => {
                 setLoadingFolders(true);
                 try {
-                    const listResp = await window.gapi.client.drive.files.list({
-                        'pageSize': 100,
-                        'fields': "nextPageToken, files(id, name)",
-                        'q': `'${parentId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
-                        'orderBy': 'name',
-                        supportsAllDrives: true,
-                        includeItemsFromAllDrives: true
-                    });
+                    let allSubs = [];
+                    let pageToken = null;
+                    do {
+                        const listResp = await window.gapi.client.drive.files.list({
+                            'pageSize': 100,
+                            'pageToken': pageToken,
+                            'fields': "nextPageToken, files(id, name, mimeType, shortcutDetails)",
+                            'q': `'${parentId}' in parents and (mimeType = 'application/vnd.google-apps.folder' or mimeType = 'application/vnd.google-apps.shortcut') and trashed = false`,
+                            'orderBy': 'name',
+                            supportsAllDrives: true,
+                            includeItemsFromAllDrives: true
+                        });
+                        if (listResp.result.files) {
+                            allSubs = [...allSubs, ...listResp.result.files];
+                        }
+                        pageToken = listResp.result.nextPageToken;
+                    } while (pageToken);
                     
-                    const subs = listResp.result.files || [];
-                    setCurrentSubFolders(subs);
+                    const validSubs = allSubs.filter(f => {
+                        if (f.mimeType === 'application/vnd.google-apps.shortcut') {
+                            return f.shortcutDetails && f.shortcutDetails.targetMimeType === 'application/vnd.google-apps.folder';
+                        }
+                        return true;
+                    });
+
+                    setCurrentSubFolders(validSubs);
+                    addLog(`資料夾 ${parentId} 讀取完成，顯示 ${validSubs.length} 個子資料夾`);
                 } catch (err) {
                     addLog(`讀取子資料夾失敗: ${err.message}`, 'error');
                 } finally {
@@ -213,26 +228,24 @@
                 }
             };
 
-            // 進入下一層資料夾
             const handleEnterFolder = async (folder) => {
-                // 更新路徑堆疊
-                setNavStack(prev => [...prev, folder]);
-                // 讀取新資料夾的內容
-                await fetchSubfolders(folder.id);
+                let targetId = folder.id;
+                if (folder.mimeType === 'application/vnd.google-apps.shortcut' && folder.shortcutDetails) {
+                    targetId = folder.shortcutDetails.targetId;
+                    addLog(`解析捷徑: ${folder.name} -> ID: ${targetId}`);
+                }
+                setNavStack(prev => [...prev, { id: targetId, name: folder.name }]);
+                await fetchSubfolders(targetId);
             };
 
-            // 返回上一層
             const handleNavigateUp = async (index) => {
-                // 如果點擊的是當前目錄，不動作
                 if (index === navStack.length - 1) return;
-
                 const newStack = navStack.slice(0, index + 1);
                 setNavStack(newStack);
                 const targetFolder = newStack[newStack.length - 1];
                 await fetchSubfolders(targetFolder.id);
             };
 
-            // 確認選擇此資料夾
             const handleConfirmFolder = () => {
                 const currentFolder = navStack[navStack.length - 1];
                 setSelectedFolder(currentFolder);
@@ -240,35 +253,49 @@
                 setCurrentStep('upload');
             };
 
-            const handleFileSelect = async (event) => {
+            // --- Multi-Reference Logic ---
+            const handleAddReferenceImage = async (event) => {
                 const file = event.target.files[0];
-                if (file) {
-                    const reader = new FileReader();
-                    reader.onload = async (e) => {
-                        const imgUrl = e.target.result;
-                        setSelectedImage(imgUrl);
-                        
-                        if (modelsLoaded) {
-                            setStatus("正在分析您的臉部特徵...");
-                            try {
-                                const img = await faceapi.fetchImage(imgUrl);
-                                const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
-                                if (detections) {
-                                    setTargetDescriptor(detections.descriptor);
-                                    setStatus("臉部特徵提取成功！");
-                                    addLog("目標人臉特徵提取成功", 'success');
-                                } else {
-                                    alert("無法在圖片中檢測到人臉，請換一張清晰的正面照。");
-                                    addLog("上傳圖片中未檢測到人臉", 'warn');
-                                    setSelectedImage(null);
-                                }
-                            } catch (err) {
-                                addLog("分析上傳圖片失敗: " + err.message, 'error');
+                if (!file) return;
+                
+                // Clear input value so same file can be selected again
+                event.target.value = '';
+
+                const reader = new FileReader();
+                reader.onload = async (e) => {
+                    const imgUrl = e.target.result;
+                    
+                    if (modelsLoaded) {
+                        setStatus("正在分析照片特徵...");
+                        try {
+                            const img = await faceapi.fetchImage(imgUrl);
+                            const detections = await faceapi.detectSingleFace(img).withFaceLandmarks().withFaceDescriptor();
+                            
+                            if (detections) {
+                                setReferenceImages(prev => [
+                                    ...prev, 
+                                    { 
+                                        id: Date.now(), 
+                                        url: imgUrl, 
+                                        descriptor: detections.descriptor 
+                                    }
+                                ]);
+                                setStatus("照片已加入參考列表！");
+                                addLog("成功提取臉部特徵並加入列表", 'success');
+                            } else {
+                                alert("無法在圖片中檢測到人臉，請換一張清晰的正面照。");
+                                addLog("上傳圖片中未檢測到人臉", 'warn');
                             }
+                        } catch (err) {
+                            addLog("分析上傳圖片失敗: " + err.message, 'error');
                         }
-                    };
-                    reader.readAsDataURL(file);
-                }
+                    }
+                };
+                reader.readAsDataURL(file);
+            };
+
+            const removeReferenceImage = (id) => {
+                setReferenceImages(prev => prev.filter(img => img.id !== id));
             };
 
             const fetchImageAsBlobUrl = async (url) => {
@@ -313,13 +340,10 @@
                 }
             };
 
-            // 深度遞歸掃描資料夾
             const crawlFolder = async (folderId, currentSignal, allFiles = []) => {
                 if (allFiles.length >= MAX_SCAN_FILES || currentSignal.aborted) return allFiles;
 
                 let pageToken = null;
-                
-                // 1. 抓取當前資料夾的照片
                 do {
                     if (allFiles.length >= MAX_SCAN_FILES || currentSignal.aborted) break;
 
@@ -337,38 +361,35 @@
                         addLog(`掃描... 累積 ${allFiles.length} 張`);
                         setStatus(`正在建立清單 (${allFiles.length} 張)...`);
                     }
-                    
                     pageToken = filesResp.result.nextPageToken;
                 } while (pageToken);
 
-                // 2. 抓取子資料夾
                 let folderPageToken = null;
                 const subFoldersList = [];
-                
                 do {
                     if (currentSignal.aborted) break;
-                    
                     const foldersResp = await window.gapi.client.drive.files.list({
                         'pageSize': 50,
                         'pageToken': folderPageToken,
-                        'fields': "nextPageToken, files(id, name)",
-                        'q': `'${folderId}' in parents and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+                        'fields': "nextPageToken, files(id, name, mimeType, shortcutDetails)",
+                        'q': `'${folderId}' in parents and (mimeType = 'application/vnd.google-apps.folder' or mimeType = 'application/vnd.google-apps.shortcut') and trashed = false`,
                         supportsAllDrives: true,
                         includeItemsFromAllDrives: true
                     });
-                    
-                    if (foldersResp.result.files) {
-                        subFoldersList.push(...foldersResp.result.files);
-                    }
+                    if (foldersResp.result.files) subFoldersList.push(...foldersResp.result.files);
                     folderPageToken = foldersResp.result.nextPageToken;
                 } while (folderPageToken);
 
-                // 3. 遞歸
                 for (const sub of subFoldersList) {
                     if (allFiles.length >= MAX_SCAN_FILES || currentSignal.aborted) break;
-                    await crawlFolder(sub.id, currentSignal, allFiles);
+                    let targetId = sub.id;
+                    if (sub.mimeType === 'application/vnd.google-apps.shortcut' && sub.shortcutDetails) {
+                        if (sub.shortcutDetails.targetMimeType === 'application/vnd.google-apps.folder') {
+                            targetId = sub.shortcutDetails.targetId;
+                        } else continue;
+                    }
+                    await crawlFolder(targetId, currentSignal, allFiles);
                 }
-
                 return allFiles;
             };
             
@@ -381,7 +402,7 @@
             };
 
             const startSearch = async () => {
-                if (!modelsLoaded || !targetDescriptor) return;
+                if (!modelsLoaded || referenceImages.length === 0) return;
 
                 abortControllerRef.current = new AbortController();
                 const { signal } = abortControllerRef.current;
@@ -391,13 +412,12 @@
                 setScanProgress(0);
                 setDebugLogs([]);
                 setFoundPhotos([]);
-                addLog("開始深度搜尋任務...");
+                addLog(`開始搜尋 (靈敏度: ${threshold}, 參考圖: ${referenceImages.length} 張)...`);
 
                 try {
                     const startFolder = selectedFolder || navStack[0];
                     addLog(`搜尋起點: ${startFolder.name}`);
 
-                    // 1. 執行爬蟲
                     setStatus(`正在掃描: ${startFolder.name} 及其子資料夾...`);
                     const allFiles = await crawlFolder(startFolder.id, signal, []);
 
@@ -433,26 +453,35 @@
                             const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
                             
                             const img = await faceapi.fetchImage(blobUrl);
-                            const detections = await faceapi.detectAllFaces(img).withFaceLandmarks().withFaceDescriptors();
+                            // 稍微降低 minConfidence 以偵測較模糊的臉
+                            const detections = await faceapi.detectAllFaces(img, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.4 })).withFaceLandmarks().withFaceDescriptors();
                             
                             if (detections.length === 0) {
                                 // addLog(`[無人臉] ${file.name}`);
                             } else {
-                                let bestDist = 1.0;
+                                // 比對邏輯：這張照片裡的任何一張臉，是否像我們參考圖庫裡的任何一張臉？
+                                let bestMatchDistance = 1.0; 
+                                
+                                // 針對照片裡的每一張臉 (d)
                                 detections.forEach(d => {
-                                    const dist = faceapi.euclideanDistance(targetDescriptor, d.descriptor);
-                                    if (dist < bestDist) bestDist = dist;
+                                    // 針對參考圖庫裡的每一張臉 (ref)
+                                    referenceImages.forEach(ref => {
+                                        const dist = faceapi.euclideanDistance(ref.descriptor, d.descriptor);
+                                        if (dist < bestMatchDistance) bestMatchDistance = dist;
+                                    });
                                 });
 
-                                const isMatch = bestDist < 0.55; 
+                                // 使用用戶設定的 Threshold (0.1 ~ 0.9)
+                                const isMatch = bestMatchDistance < threshold;
+                                
                                 if (isMatch) {
-                                    addLog(`[匹配!] ${file.name} - 距離: ${bestDist.toFixed(4)}`, 'success');
+                                    addLog(`[匹配!] ${file.name} - 距離: ${bestMatchDistance.toFixed(4)}`, 'success');
                                     matches.push({
                                         id: file.id,
                                         url: file.thumbnailLink,
                                         name: file.name,
                                         webViewLink: file.webViewLink,
-                                        score: Math.floor((1 - bestDist) * 100)
+                                        score: Math.floor((1 - bestMatchDistance) * 100)
                                     });
                                 }
                             }
@@ -498,7 +527,7 @@
                                 </div>
                                 <div>
                                     <h1 className="text-xl font-bold text-gray-900">Photo Team 找相助手</h1>
-                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">導航版</span>
+                                    <span className="text-xs text-blue-600 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-100">高準確度版</span>
                                 </div>
                             </div>
                             {user && (
@@ -567,7 +596,11 @@
                                                         className="flex items-center justify-between p-3 hover:bg-blue-50 cursor-pointer border-b border-gray-100 last:border-0 transition-colors group"
                                                     >
                                                         <div className="flex items-center">
-                                                            <Icons.Folder className="w-5 h-5 text-blue-400 mr-3" />
+                                                            {folder.mimeType === 'application/vnd.google-apps.shortcut' ? (
+                                                                <Icons.Shortcut className="w-5 h-5 text-gray-400 mr-3" />
+                                                            ) : (
+                                                                <Icons.Folder className="w-5 h-5 text-blue-400 mr-3" />
+                                                            )}
                                                             <span className="text-gray-700 font-medium group-hover:text-blue-700">{folder.name}</span>
                                                         </div>
                                                         <Icons.ArrowRight className="w-4 h-4 text-gray-300 group-hover:text-blue-400" />
@@ -593,7 +626,7 @@
 
                             {/* Upload */}
                             {currentStep === 'upload' && (
-                                <div className="flex-1 flex flex-col items-center justify-center space-y-6">
+                                <div className="flex-1 flex flex-col items-center space-y-6 animate-[fadeIn_0.5s_ease-out]">
                                     <div className="w-full flex justify-between items-center">
                                          <button onClick={() => setCurrentStep('navigate-folder')} className="text-sm text-gray-400 hover:text-gray-600 flex items-center">
                                             ← 重新選擇資料夾
@@ -603,15 +636,65 @@
                                             {selectedFolder ? selectedFolder.name : "..."}
                                         </span>
                                     </div>
-                                    <h2 className="text-2xl font-bold">上傳目標照片</h2>
-                                    <label className="cursor-pointer group">
-                                        <div className={`w-64 h-64 rounded-2xl border-4 border-dashed flex items-center justify-center overflow-hidden relative transition-all ${selectedImage ? 'border-blue-500 bg-gray-50' : 'border-gray-300 hover:border-gray-400'}`}>
-                                            {selectedImage ? <img src={selectedImage} className="w-full h-full object-cover" /> : <Icons.Camera className="w-12 h-12 text-gray-300" />}
-                                            <input type="file" className="hidden" accept="image/*" onChange={handleFileSelect} />
+                                    
+                                    <div className="text-center space-y-2">
+                                        <h2 className="text-2xl font-bold">建立參考圖庫</h2>
+                                        <p className="text-gray-500 text-sm">上傳越多不同角度/表情的照片，辨識越準確</p>
+                                    </div>
+
+                                    {/* Reference Images List */}
+                                    <div className="w-full grid grid-cols-3 gap-3">
+                                        {referenceImages.map((img) => (
+                                            <div key={img.id} className="relative aspect-square rounded-lg overflow-hidden group shadow-sm">
+                                                <img src={img.url} className="w-full h-full object-cover" />
+                                                <button 
+                                                    onClick={() => removeReferenceImage(img.id)}
+                                                    className="absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+                                                >
+                                                    <Icons.Trash className="w-5 h-5" />
+                                                </button>
+                                            </div>
+                                        ))}
+                                        
+                                        {/* Add Button */}
+                                        <label className="relative aspect-square rounded-lg border-2 border-dashed border-gray-300 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50 transition-colors">
+                                            <Icons.Plus className="w-8 h-8 text-gray-400 mb-1" />
+                                            <span className="text-xs text-gray-500 font-medium">加入照片</span>
+                                            <input type="file" className="hidden" accept="image/*" onChange={handleAddReferenceImage} />
+                                        </label>
+                                    </div>
+
+                                    {/* Settings: Sensitivity */}
+                                    <div className="w-full bg-white p-4 rounded-xl border shadow-sm">
+                                        <div className="flex justify-between items-center mb-2">
+                                            <div className="flex items-center text-sm font-bold text-gray-700">
+                                                <Icons.Settings className="w-4 h-4 mr-2" />
+                                                辨識靈敏度 (閾值)
+                                            </div>
+                                            <span className="text-sm font-mono bg-gray-100 px-2 rounded text-blue-600">{threshold}</span>
                                         </div>
-                                    </label>
-                                    <p className={`text-sm ${targetDescriptor ? 'text-green-600' : 'text-orange-500'}`}>{status}</p>
-                                    <button onClick={startSearch} disabled={!selectedImage || !targetDescriptor} className={`w-64 py-3 rounded-xl font-semibold flex items-center justify-center ${selectedImage && targetDescriptor ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-400'}`}>
+                                        <input 
+                                            type="range" 
+                                            min="0.3" 
+                                            max="0.7" 
+                                            step="0.05" 
+                                            value={threshold}
+                                            onChange={(e) => setThreshold(parseFloat(e.target.value))}
+                                            className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+                                        />
+                                        <div className="flex justify-between text-xs text-gray-400 mt-1">
+                                            <span>嚴格 (精準)</span>
+                                            <span>寬鬆 (多結果)</span>
+                                        </div>
+                                    </div>
+
+                                    <p className={`text-sm ${referenceImages.length > 0 ? 'text-green-600' : 'text-orange-500'}`}>{status}</p>
+                                    
+                                    <button 
+                                        onClick={startSearch} 
+                                        disabled={referenceImages.length === 0} 
+                                        className={`w-full py-3 rounded-xl font-semibold flex items-center justify-center shadow-lg transition-all ${referenceImages.length > 0 ? 'bg-blue-600 text-white hover:bg-blue-700' : 'bg-gray-200 text-gray-400'}`}
+                                    >
                                         <Icons.Search className="w-5 h-5 mr-2" /> 開始搜尋
                                     </button>
                                 </div>
@@ -632,7 +715,7 @@
                                             onClick={stopSearch}
                                             className="mx-auto flex items-center px-4 py-2 bg-red-100 text-red-600 rounded-full hover:bg-red-200 transition-colors text-sm font-bold"
                                         >
-                                            <Icons.Stop className="w-4 h-4 mr-2" /> 停止搜尋 (顯示目前結果)
+                                            <Icons.Stop className="w-4 h-4 mr-2" /> 停止搜尋
                                         </button>
                                     </div>
                                 </div>
