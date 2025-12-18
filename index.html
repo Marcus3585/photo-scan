@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photo Team 找相助手</title>
+    <title>Photo Team 找相助手 (修復版)</title>
     
     <!-- 1. 引入 Tailwind CSS (樣式) -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -39,8 +39,6 @@
 
         /* =============================================================================
            【設定區】
-           1. CLIENT_ID: 您的 Google Cloud Client ID
-           2. TARGET_FOLDER_ID: 已填入您的 Photo Team 資料夾 ID
            =============================================================================
         */
         const CLIENT_ID = "906447546310-1np59gt29f4mssiogc2ghcdk8fje30jo.apps.googleusercontent.com"; 
@@ -88,6 +86,7 @@
             const [selectedImage, setSelectedImage] = useState(null);
             const [targetDescriptor, setTargetDescriptor] = useState(null);
             const [status, setStatus] = useState('');
+            const [errorMessage, setErrorMessage] = useState(null); // 新增錯誤訊息狀態
             const [driveFiles, setDriveFiles] = useState([]);
             const [foundPhotos, setFoundPhotos] = useState([]);
             const [scanProgress, setScanProgress] = useState(0);
@@ -165,24 +164,31 @@
                     alert("請先用文字編輯器打開此檔案，填入正確的 CLIENT_ID！");
                     return;
                 }
+                setErrorMessage(null); // 清除舊錯誤
                 if (tokenClient) {
                     tokenClient.requestAccessToken();
                 }
             };
 
-            // 驗證並鎖定特定資料夾
+            // 驗證並鎖定特定資料夾 (修復：加入 supportsAllDrives 參數)
             const verifyAndSetTargetFolder = async (folderId) => {
                 try {
                     const response = await window.gapi.client.drive.files.get({
                         fileId: folderId,
-                        fields: 'id, name'
+                        fields: 'id, name, webViewLink',
+                        supportsAllDrives: true // 關鍵：支援共用雲端硬碟
                     });
                     const folder = response.result;
                     setSelectedFolder(folder);
                     setCurrentStep('upload');
                 } catch (err) {
                     console.error("無法存取指定資料夾", err);
-                    alert("無法存取指定的 Photo Team 資料夾。請確認您是否有權限檢視該資料夾。");
+                    
+                    let msg = "無法存取指定的資料夾。";
+                    if (err.status === 404) msg += " (找不到資料夾，請確認 ID 是否正確或已刪除)";
+                    if (err.status === 403) msg += " (權限不足，請確認您已獲得該資料夾的檢視權限)";
+                    
+                    setErrorMessage(msg + ` [錯誤代碼: ${err.status}]`);
                     setUser(null);
                     setCurrentStep('login');
                 }
@@ -195,13 +201,15 @@
                         'pageSize': 50,
                         'fields': "nextPageToken, files(id, name)",
                         'q': "mimeType = 'application/vnd.google-apps.folder' and trashed = false",
-                        'orderBy': 'folder, name'
+                        'orderBy': 'folder, name',
+                        supportsAllDrives: true,
+                        includeItemsFromAllDrives: true
                     });
                     setFolders(response.result.files || []);
                     setCurrentStep('select-folder');
                 } catch (err) {
                     console.error("Error fetching folders", err);
-                    alert("無法讀取資料夾列表，直接進入上傳步驟。");
+                    setErrorMessage("無法讀取資料夾列表: " + err.message);
                     setCurrentStep('upload');
                 }
             };
@@ -253,22 +261,23 @@
                 try {
                     setStatus('正在列出資料夾中的圖片...');
                     
-                    // 建構查詢語句
-                    let query = "(mimeType = 'image/jpeg' or mimeType = 'image/png') and trashed = false";
+                    // 建構查詢語句 (修復：放寬 MIME 限制，搜尋所有圖片類型)
+                    let query = "mimeType contains 'image/' and trashed = false";
                     
                     // 強制加入 parents 條件
                     if (selectedFolder) {
                         query += ` and '${selectedFolder.id}' in parents`;
                         setStatus(`正在搜尋 Photo Team 資料夾：${selectedFolder.name}...`);
                     } else {
-                        // 如果萬一沒有 selectedFolder (全域模式)，則搜尋整個 Drive
                         setStatus(`正在搜尋整個雲端硬碟...`);
                     }
 
                     const response = await window.gapi.client.drive.files.list({
                         'pageSize': 50, 
                         'fields': "nextPageToken, files(id, name, thumbnailLink, webContentLink, createdTime)",
-                        'q': query
+                        'q': query,
+                        supportsAllDrives: true,       // 關鍵：支援共用雲端硬碟
+                        includeItemsFromAllDrives: true // 關鍵：包含所有來源
                     });
                     
                     const files = response.result.files;
@@ -336,6 +345,9 @@
                 } catch (err) {
                     console.error(err);
                     setStatus('發生錯誤：' + err.message);
+                    setErrorMessage(err.message);
+                    // 發生嚴重錯誤時返回上一步
+                    setTimeout(() => setCurrentStep('upload'), 3000);
                 }
             };
 
@@ -391,6 +403,14 @@
                                             請登入以存取共享的相片資料夾。系統將自動掃描並找出屬於您的照片。
                                         </p>
                                     </div>
+
+                                    {/* 錯誤訊息顯示區 */}
+                                    {errorMessage && (
+                                        <div className="bg-red-50 text-red-600 px-4 py-3 rounded-lg text-sm max-w-md flex items-start">
+                                            <Icons.AlertCircle className="w-5 h-5 mr-2 shrink-0" />
+                                            <div>{errorMessage}</div>
+                                        </div>
+                                    )}
                                     
                                     {CLIENT_ID.includes("YOUR_CLIENT_ID") ? (
                                         <div className="bg-red-50 border border-red-200 text-red-600 p-4 rounded-lg flex items-start text-left text-sm max-w-md">
