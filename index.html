@@ -259,16 +259,13 @@
                         setScanProgress(progress);
                         setStatus(`分析中: ${file.name}`);
                         
-                        if (!file.thumbnailLink) {
-                            addLog(`[跳過] ${file.name} - 無縮圖連結`);
-                            continue;
-                        }
-
                         try {
-                            // 策略：先嘗試高清縮圖，失敗則用普通縮圖
-                            let fetchUrl = file.thumbnailLink.replace('=s220', '=s1000'); 
+                            // 【關鍵修正】: 
+                            // 舊方式: 用 thumbnailLink (容易被 CORS 擋)
+                            // 新方式: 用 Google Drive API 的 'media' 下載點 (支援 Token 驗證)
+                            const fetchUrl = `https://www.googleapis.com/drive/v3/files/${file.id}?alt=media`;
                             
-                            // 關鍵修改：使用 fetch + blob 載入圖片
+                            // 使用帶 Token 的 fetch 下載圖片數據
                             const blobUrl = await fetchImageAsBlobUrl(fetchUrl);
                             
                             const img = await faceapi.fetchImage(blobUrl);
@@ -284,13 +281,13 @@
                                 });
 
                                 // 顯示每張照片的最佳距離 (越小越像)
-                                const isMatch = bestDist < 0.55; // 稍微嚴格一點
+                                const isMatch = bestDist < 0.55; 
                                 addLog(`[${isMatch ? '匹配' : '不符'}] ${file.name} - 距離: ${bestDist.toFixed(4)}`);
 
                                 if (isMatch) {
                                     matches.push({
                                         id: file.id,
-                                        url: file.thumbnailLink, // 顯示用原連結
+                                        url: file.thumbnailLink, // 顯示用原縮圖連結
                                         name: file.name,
                                         score: Math.floor((1 - bestDist) * 100)
                                     });
